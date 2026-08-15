@@ -1564,7 +1564,7 @@ function updateDailyRecommendDisplay() {
         }).join('');
 
         // 重新绑定播放按钮事件 - 使用统一的 PlayerController
-        const playBtns = dailySongsPreview.querySelectorAll('.song-play-btn');
+        const playBtns = dailySongsPreview.querySelectorAll('.play-btn');
         console.log('绑定每日推荐播放按钮事件，按钮数量:', playBtns.length);
         playBtns.forEach((btn) => {
             btn.addEventListener('click', (e) => {
@@ -1610,11 +1610,13 @@ function updateDailyRecommendDisplay() {
 
         // 绑定双击播放事件
         songItems.forEach((item) => {
-            item.addEventListener('dblclick', () => {
-                const index = parseInt(item.dataset.index);
-                console.log('每日推荐歌曲项被双击，索引:', index);
+            item.addEventListener('click', (e) => {
+                if (e.target.closest('.play-btn') || e.target.closest('.like-btn')) {
+                    return;
+                }
 
-                // 使用 PlayerController 播放指定索引的歌曲
+                const index = parseInt(item.dataset.index);
+                console.log('每日推荐歌曲项被点击，索引:', index);
                 if (window.PlayerController) {
                     window.PlayerController.playPlaylist(currentDailyRecommendList, index, '每日推荐');
                 }
