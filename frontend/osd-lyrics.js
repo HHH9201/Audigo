@@ -191,24 +191,31 @@ async function updateOSDLyrics(lyricsText, songName = '', artist = '') {
 
 // 发送原始歌词行到OSD（简化版本，只发送当前行，OSD自己计算播放进度）
 async function sendKRCLineToOSD(lyricsLine) {
+    // 获取当前播放的歌曲信息
+    const currentSong = getCurrentSong();
+    const songName = currentSong?.songname || currentSong?.title || '';
+    const artist = currentSong?.author_name || currentSong?.artist || '';
+
+    // 获取原始歌词行文本
+    const originalLine = lyricsLine.originalLine || '';
+    const format = lyricsLine.format || 'lrc';
+
+    if (!originalLine) {
+        console.warn('⚠️ 没有原始歌词行文本');
+        return;
+    }
+
+    Events.Emit('taskbar-lyrics:update', {
+        lyricsText: lyricsLine.text || originalLine,
+        songName,
+        artist
+    });
+
     if (!osdLyricsService) {
         return;
     }
 
     try {
-        // 获取当前播放的歌曲信息
-        const currentSong = getCurrentSong();
-        const songName = currentSong?.songname || currentSong?.title || '';
-        const artist = currentSong?.author_name || currentSong?.artist || '';
-
-        // 获取原始歌词行文本
-        const originalLine = lyricsLine.originalLine || '';
-        const format = lyricsLine.format || 'lrc';
-
-        if (!originalLine) {
-            console.warn('⚠️ 没有原始歌词行文本');
-            return;
-        }
 
         // console.log(`🎵 发送原始${format.toUpperCase()}歌词行到OSD:`, originalLine);
 

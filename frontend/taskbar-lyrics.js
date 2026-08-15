@@ -11,7 +11,10 @@ function getData(event) {
 function updateLyrics(data) {
     const songName = String(data.songName || "").trim();
     const artist = String(data.artist || "").trim();
-    const text = String(data.lyricsText || placeholder).trim() || placeholder;
+    const text = String(data.lyricsText || placeholder)
+        .replace(/^\[\d+,\d+\]/, '')
+        .replace(/<\d+,\d+,\d+>/g, '')
+        .trim() || placeholder;
 
     songInfo.textContent = songName && artist ? `${songName} · ${artist}` : songName || artist;
     lyricsText.textContent = text;
