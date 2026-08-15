@@ -3,6 +3,8 @@
  * 负责桌面歌词的显示和控制
  */
 
+import { Events } from "@wailsio/runtime";
+
 // OSD歌词状态
 let osdLyricsEnabled = true; // 桌面歌词是否打开
 let osdLyricsService = null; // 服务对象，初始化时设置
@@ -114,6 +116,9 @@ async function toggleOSDLyrics() {
         if (response && response.success) {
             osdLyricsEnabled = newState;
             updateOSDLyricsButtonState();
+            Events.Emit(newState ? 'taskbar-lyrics:show' : 'taskbar-lyrics:hide', {
+                lyricsText: '♪ ♫ ♪ ♫'
+            });
 
             // 如果启用了OSD歌词，立即更新当前歌词
             if (osdLyricsEnabled) {
@@ -166,6 +171,7 @@ function updateOSDLyricsButtonState() {
 
 // 更新OSD歌词内容
 async function updateOSDLyrics(lyricsText, songName = '', artist = '') {
+    Events.Emit('taskbar-lyrics:update', { lyricsText, songName, artist });
     if (!osdLyricsService) {
         console.warn('⚠️ OSD歌词服务未初始化');
         return;

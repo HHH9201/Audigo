@@ -11,7 +11,10 @@ export default defineConfig({
     copyPublicDir: true,
     // 构建时复制额外的文件
     rollupOptions: {
-      input: 'index.html'
+      input: {
+        main: 'index.html',
+        taskbarLyrics: 'taskbar-lyrics.html'
+      }
     }
   },
   

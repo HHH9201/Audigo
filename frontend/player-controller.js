@@ -174,6 +174,9 @@ async function playCurrentSong() {
             if (player && player.play) {
                 try {
                     // 直接调用HTML5播放器的play方法，避免循环调用
+                    // #region debug-point A:player-call
+                    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'playback-cache-no-start', runId: 'pre-fix', hypothesisId: 'A', location: 'player-controller.js:177', msg: '[DEBUG] 调用播放器', data: { hasPlayer: true, hasPlay: true, urlCount: Array.isArray(playUrls) ? playUrls.length : null, songHash: legacySong.hash }, ts: Date.now() }) }).catch(() => {});
+                    // #endregion
                     success = await player.play(legacySong, playUrls);
                     if (success) {
                         console.log('✅ HTML5 音频播放器播放成功');

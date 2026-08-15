@@ -1,0 +1,43 @@
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: transparent;
+}
+
+body {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    user-select: none;
+}
+
+#lyricsWindow {
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 8px 18px;
+    color: #ffffff;
+    text-align: center;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.65);
+    pointer-events: none;
+}
+
+#songInfo {
+    min-height: 16px;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12px;
+    line-height: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#lyricsText {
+    overflow: hidden;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 30px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

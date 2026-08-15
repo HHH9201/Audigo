@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -118,6 +119,14 @@ func (c *CacheService) StartHTTPServerWithOSDLyrics() error {
 			log.Printf("❌ 文件不存在: %s\n", filePath)
 			http.NotFound(w, r)
 			return
+		}
+
+		contentType := mime.TypeByExtension(filepath.Ext(filePath))
+		if strings.EqualFold(filepath.Ext(filePath), ".flac") {
+			contentType = "audio/flac"
+		}
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
 		}
 
 		// 设置CORS头

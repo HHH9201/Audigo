@@ -14,6 +14,7 @@ import (
 
 // 全局缓存服务实例
 var globalCacheService *CacheService
+var globalTaskbarLyricsWindow application.Window
 
 // Wails uses Go's `embed` package to embed the frontend files into the binary.
 // Any files in the frontend/dist folder will be embedded into the binary and
@@ -140,6 +141,24 @@ func main() {
 		},
 		BackgroundColour: application.NewRGB(248, 250, 252), // 使用浅色主题的背景色
 		URL:              "/",
+	})
+
+	globalTaskbarLyricsWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:              "taskbar-lyrics",
+		Title:             "桌面歌词",
+		Width:             720,
+		Height:            70,
+		Frameless:         true,
+		AlwaysOnTop:       true,
+		Hidden:            true,
+		DisableResize:     true,
+		IgnoreMouseEvents: true,
+		BackgroundType:    application.BackgroundTypeTransparent,
+		Windows: application.WindowsWindow{
+			HiddenOnTaskbar:                   true,
+			DisableFramelessWindowDecorations: true,
+		},
+		URL: "/taskbar-lyrics.html",
 	})
 
 	// 创建系统托盘图标
@@ -269,6 +288,11 @@ func main() {
 
 	// 应用退出时取消注册媒体键
 	mediaKeyService.UnregisterMediaKeys()
+
+	if globalTaskbarLyricsWindow != nil {
+		globalTaskbarLyricsWindow.Hide()
+		globalTaskbarLyricsWindow.Close()
+	}
 
 	// 应用退出时，停止OSD歌词程序
 	if cacheService != nil {
