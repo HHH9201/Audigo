@@ -1563,28 +1563,14 @@ function updateDailyRecommendDisplay() {
             </div>`;
         }).join('');
 
-        // 重新绑定播放按钮事件 - 使用统一的 PlayerController
-        const playBtns = dailySongsPreview.querySelectorAll('.play-btn');
-        console.log('绑定每日推荐播放按钮事件，按钮数量:', playBtns.length);
-        playBtns.forEach((btn) => {
-            btn.addEventListener('click', (e) => {
-                const index = parseInt(btn.dataset.index);
-                console.log('每日推荐播放按钮被点击，索引:', index);
-                e.stopPropagation();
-
-                // 使用 PlayerController 播放指定索引的歌曲
-                if (window.PlayerController) {
-                    window.PlayerController.playPlaylist(currentDailyRecommendList, index, '每日推荐');
-                }
-            });
-        });
-
         // 绑定歌曲项事件 - 使用统一的 PlayerController
         const songItems = dailySongsPreview.querySelectorAll('.song-list-item');
         console.log('绑定每日推荐歌曲项点击事件，歌曲数量:', songItems.length);
 
-        // 绑定播放按钮事件
-        dailySongsPreview.addEventListener('click', (e) => {
+        // 绑定播放按钮事件（容器只绑定一次，避免每次刷新重复触发播放）
+        if (!dailySongsPreview.dataset.clickEventsBound) {
+            dailySongsPreview.dataset.clickEventsBound = 'true';
+            dailySongsPreview.addEventListener('click', (e) => {
             if (e.target.closest('.play-btn')) {
                 const songItem = e.target.closest('.song-list-item');
                 const index = parseInt(songItem.dataset.index);
@@ -1606,7 +1592,8 @@ function updateDailyRecommendDisplay() {
                     window.addToFavorites(songId);
                 }
             }
-        });
+            });
+        }
 
         // 绑定双击播放事件
         songItems.forEach((item) => {
@@ -2863,6 +2850,9 @@ function updateLyricsHighlight(currentTime) {
 
     if (format === 'krc') {
         updateKRCLyricsHighlight(currentTime);
+        if (window.OSDLyrics?.updateTaskbarLyrics && lastActiveLineIndex >= 0) {
+            window.OSDLyrics.updateTaskbarLyrics(currentLyricsLines[lastActiveLineIndex], currentTime);
+        }
     } else {
         updateLRCLyricsHighlight(currentTime);
     }
@@ -2908,7 +2898,7 @@ function updateLRCLyricsHighlight(currentTime) {
         // 发送完整的行数据到OSD（与KRC格式保持一致）
         const currentLine = currentLyricsLines[activeIndex];
         if (currentLine && window.sendKRCLineToOSD) {
-            window.sendKRCLineToOSD(currentLine);
+            window.sendKRCLineToOSD(currentLine, currentTime);
         }
     } else if (activeIndex !== currentActiveLyricsIndex) {
         // 行变化但没有活跃行（可能是歌曲结束）
@@ -2973,7 +2963,7 @@ function updateKRCLyricsHighlight(currentTime) {
     if (hasLineChanged && activeLineIndex >= 0) {
         const currentLine = currentLyricsLines[activeLineIndex];
         if (currentLine && window.sendKRCLineToOSD) {
-            window.sendKRCLineToOSD(currentLine);
+            window.sendKRCLineToOSD(currentLine, currentTime);
         }
     }
 

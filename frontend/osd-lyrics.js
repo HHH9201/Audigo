@@ -189,8 +189,35 @@ async function updateOSDLyrics(lyricsText, songName = '', artist = '') {
     }
 }
 
+function updateTaskbarLyrics(lyricsLine, currentTime = 0) {
+    const currentSong = getCurrentSong();
+    const songName = currentSong?.songname || currentSong?.title || '';
+    const artist = currentSong?.author_name || currentSong?.artist || '';
+    sendTaskbarLyrics(lyricsLine, currentTime, songName, artist, lyricsLine.originalLine || '');
+}
+
+function sendTaskbarLyrics(lyricsLine, currentTime, songName, artist, originalLine) {
+    const words = Array.isArray(lyricsLine.words) ? lyricsLine.words : [];
+    const playedText = words
+        .filter((word) => currentTime >= Number(word.endTime || word.startTime || 0))
+        .map((word) => word.text || '')
+        .join('');
+    const remainingText = words
+        .filter((word) => currentTime < Number(word.endTime || word.startTime || 0))
+        .map((word) => word.text || '')
+        .join('');
+
+    Events.Emit('taskbar-lyrics:update', {
+        lyricsText: lyricsLine.text || originalLine,
+        playedText,
+        remainingText,
+        songName,
+        artist
+    });
+}
+
 // 发送原始歌词行到OSD（简化版本，只发送当前行，OSD自己计算播放进度）
-async function sendKRCLineToOSD(lyricsLine) {
+async function sendKRCLineToOSD(lyricsLine, currentTime = 0) {
     // 获取当前播放的歌曲信息
     const currentSong = getCurrentSong();
     const songName = currentSong?.songname || currentSong?.title || '';
@@ -205,11 +232,8 @@ async function sendKRCLineToOSD(lyricsLine) {
         return;
     }
 
-    Events.Emit('taskbar-lyrics:update', {
-        lyricsText: lyricsLine.text || originalLine,
-        songName,
-        artist
-    });
+    sendTaskbarLyrics(lyricsLine, currentTime, songName, artist, originalLine);
+
 
     if (!osdLyricsService) {
         return;
@@ -342,6 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // 导出函数供其他模块使用
 window.OSDLyrics = {
     updateOSDLyrics,
+    updateTaskbarLyrics,
     updateCurrentOSDLyrics,
     toggleOSDLyrics,
     sendKRCLineToOSD,

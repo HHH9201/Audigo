@@ -2,6 +2,7 @@
 // 统一的播放控制逻辑，基于播放列表管理器
 
 // 播放器状态 - 现在由 HTML5 Audio API 管理
+let playlistPlayRequest = null;
 
 // 备用的 updatePlayerBar 函数，防止HTML5音频集成脚本未加载
 function fallbackUpdatePlayerBar() {
@@ -51,6 +52,13 @@ async function playSong(song) {
 
 // 统一播放函数 - 歌单播放
 async function playPlaylist(songs, startIndex = 0, playlistName = '播放列表', playMode = 'repeat_all') {
+    const requestSong = songs?.[startIndex];
+    const requestKey = `${requestSong?.hash || ''}|${startIndex}|${playlistName}`;
+    if (playlistPlayRequest?.key === requestKey) {
+        console.log('🎵 忽略重复的列表播放请求:', requestKey);
+        return playlistPlayRequest.promise;
+    }
+
     console.log('🎵 播放歌单:', { songs: songs.length, startIndex, playlistName, playMode });
 
     if (!songs || songs.length === 0) {
@@ -63,22 +71,31 @@ async function playPlaylist(songs, startIndex = 0, playlistName = '播放列表'
         return false;
     }
 
-    try {
-        // 设置播放列表
-        console.log('🎵 调用PlaylistManager.setPlaylist...');
-        const success = await window.PlaylistManager.setPlaylist(songs, startIndex, playlistName, true, playMode);
-        if (!success) {
-            console.error('❌ 设置播放列表失败');
+    const promise = (async () => {
+        try {
+            // 设置播放列表
+            console.log('🎵 调用PlaylistManager.setPlaylist...');
+            const success = await window.PlaylistManager.setPlaylist(songs, startIndex, playlistName, true, playMode);
+            if (!success) {
+                console.error('❌ 设置播放列表失败');
+                return false;
+            }
+
+            console.log('🎵 播放列表设置成功，开始播放当前歌曲...');
+            return await playCurrentSong();
+        } catch (error) {
+            console.error('❌ 播放歌单失败:', error);
             return false;
         }
+    })();
 
-        console.log('🎵 播放列表设置成功，开始播放当前歌曲...');
-        // 播放当前歌曲
-        return await playCurrentSong();
-    } catch (error) {
-        console.error('❌ 播放歌单失败:', error);
-        return false;
-    }
+    playlistPlayRequest = { key: requestKey, promise };
+    promise.finally(() => {
+        if (playlistPlayRequest?.promise === promise) {
+            playlistPlayRequest = null;
+        }
+    });
+    return promise;
 }
 
 // 播放当前歌曲

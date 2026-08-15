@@ -41,3 +41,12 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+#playedText {
+    color: #79d7ff;
+    text-shadow: 0 0 8px rgba(80, 190, 255, 0.8), 0 1px 3px rgba(0, 0, 0, 0.95);
+}
+
+#remainingText {
+    color: rgba(255, 255, 255, 0.78);
+}

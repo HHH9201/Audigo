@@ -2,6 +2,8 @@ import { Events, Window } from "@wailsio/runtime";
 
 const songInfo = document.getElementById("songInfo");
 const lyricsText = document.getElementById("lyricsText");
+const playedText = document.getElementById("playedText");
+const remainingText = document.getElementById("remainingText");
 const placeholder = "♪ ♫ ♪ ♫";
 
 function getData(event) {
@@ -17,7 +19,12 @@ function updateLyrics(data) {
         .trim() || placeholder;
 
     songInfo.textContent = songName && artist ? `${songName} · ${artist}` : songName || artist;
-    lyricsText.textContent = text;
+    if (playedText && remainingText && data.playedText !== undefined) {
+        playedText.textContent = String(data.playedText || '');
+        remainingText.textContent = String(data.remainingText || '');
+    } else {
+        lyricsText.textContent = text;
+    }
 }
 
 Events.On("taskbar-lyrics:update", (event) => {
@@ -35,5 +42,10 @@ Events.On("taskbar-lyrics:hide", () => {
 
 Events.On("taskbar-lyrics:reset", () => {
     songInfo.textContent = "";
-    lyricsText.textContent = placeholder;
+    if (playedText && remainingText) {
+        playedText.textContent = "";
+        remainingText.textContent = placeholder;
+    } else {
+        lyricsText.textContent = placeholder;
+    }
 });
