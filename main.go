@@ -15,6 +15,7 @@ import (
 // 全局缓存服务实例
 var globalCacheService *CacheService
 var globalTaskbarLyricsWindow application.Window
+var globalApplication *application.App
 
 func emitTaskbarLyricsEvent(name string, data any) {
 	if globalTaskbarLyricsWindow == nil {
@@ -26,7 +27,6 @@ func emitTaskbarLyricsEvent(name string, data any) {
 		Sender: "backend",
 		Data:   data,
 	})
-	log.Printf("✅ 已发送任务栏歌词事件: %s", name)
 }
 
 // Wails uses Go's `embed` package to embed the frontend files into the binary.
@@ -135,6 +135,7 @@ func main() {
 			ProgramName: "wmplayer",
 		},
 	})
+	globalApplication = app
 
 	// Create a new window with the necessary options.
 	// 'Title' is the title of the window.
@@ -173,6 +174,10 @@ func main() {
 		},
 		URL: "/taskbar-lyrics.html",
 	})
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		attachTaskbarLyricsWindow()
+	}()
 
 	// 创建系统托盘图标
 	systemTray := app.SystemTray.New()

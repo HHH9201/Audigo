@@ -23,16 +23,6 @@ body {
     pointer-events: none;
 }
 
-#songInfo {
-    min-height: 16px;
-    overflow: hidden;
-    color: rgba(255, 255, 255, 0.72);
-    font-size: 12px;
-    line-height: 16px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 #lyricsText {
     overflow: hidden;
     font-size: 22px;

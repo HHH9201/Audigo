@@ -1,8 +1,5 @@
 import { Events, Window } from "@wailsio/runtime";
 
-console.log('[TaskbarLyrics] 页面脚本开始执行');
-
-const songInfo = document.getElementById("songInfo");
 const lyricsText = document.getElementById("lyricsText");
 const placeholder = "♪ ♫ ♪ ♫";
 let animationFrame = 0;
@@ -14,17 +11,7 @@ let lyricStartTime = 0;
 let lyricClockStart = 0;
 let lyricKey = '';
 let lastRenderedTime = 0;
-let animationTickCount = 0;
-let lastAnimationLogAt = 0;
 let lastPlayedCount = -1;
-
-function debugLog(message, data = undefined) {
-    if (data === undefined) {
-        console.log(`[TaskbarLyrics] ${message}`);
-    } else {
-        console.log(`[TaskbarLyrics] ${message}`, data);
-    }
-}
 
 function getData(event) {
     return event?.data ?? event ?? {};
@@ -76,42 +63,19 @@ function renderWordProgress(currentTime) {
 
     if (activeWordIndex !== lastPlayedCount) {
         lastPlayedCount = activeWordIndex;
-        debugLog('DOM 已更新', { currentTime: Number(currentTime.toFixed(3)), activeIndex: activeWordIndex });
     }
 }
 
 function animateLyrics(timestamp) {
-    animationTickCount += 1;
     if (lyricWords.length && lyricClockStart) {
         const currentTime = lyricStartTime + (timestamp - lyricClockStart) / 1000;
-        if (timestamp - lastAnimationLogAt >= 1000) {
-            lastAnimationLogAt = timestamp;
-            debugLog('动画帧运行中', {
-                animationTickCount,
-                currentTime: Number(currentTime.toFixed(3)),
-                wordCount: lyricWords.length
-            });
-        }
         renderWordProgress(currentTime);
-    } else if (timestamp - lastAnimationLogAt >= 1000) {
-        lastAnimationLogAt = timestamp;
-        debugLog('动画帧运行中但未进入歌词计时', {
-            animationTickCount,
-            wordCount: lyricWords.length,
-            lyricClockStart
-        });
     }
     animationFrame = requestAnimationFrame(animateLyrics);
 }
 
 function updateLyrics(data) {
     const songName = String(data.songName || "").trim();
-    debugLog('收到歌词更新事件', {
-        songName,
-        artist: String(data.artist || '').trim(),
-        currentTime: data.currentTime,
-        wordCount: Array.isArray(data.words) ? data.words.length : 0
-    });
     const artist = String(data.artist || "").trim();
     const rawLyricsText = String(data.lyricsText || '');
     const text = rawLyricsText
@@ -122,7 +86,6 @@ function updateLyrics(data) {
         ? data.words
         : parseKRCWords(rawLyricsText);
 
-    songInfo.textContent = songName && artist ? `${songName} · ${artist}` : songName || artist;
     if (eventWords.length) {
         const nextWords = eventWords;
         const nextKey = `${songName}|${artist}|${nextWords.map((word) => `${word.startTime}:${word.endTime}:${word.text}`).join('|')}`;
@@ -146,12 +109,6 @@ function updateLyrics(data) {
         if (isNewLine || isSeek || !lyricClockStart) {
             lyricStartTime = nextTime;
             lyricClockStart = performance.now();
-            debugLog('重置歌词动画时钟', {
-                reason: isNewLine ? 'new-line' : isSeek ? 'seek' : 'initial',
-                lyricStartTime: nextTime,
-                wordCount: nextWords.length,
-                firstWord: nextWords[0]
-            });
         }
         lyricKey = nextKey;
         lastRenderedTime = nextTime;
@@ -166,32 +123,21 @@ function updateLyrics(data) {
 }
 
 Events.On("taskbar-lyrics:update", (event) => {
-    debugLog('收到 taskbar-lyrics:update 事件');
     updateLyrics(getData(event));
 });
-debugLog('taskbar-lyrics:update 监听器已注册');
 
 animationFrame = requestAnimationFrame(animateLyrics);
-debugLog('requestAnimationFrame 已启动', { animationFrame });
-debugLog('DOM 初始化状态', {
-        songInfo: !!songInfo,
-        lyricsText: !!lyricsText
-    });
 
 Events.On("taskbar-lyrics:show", (event) => {
-    debugLog('收到显示事件');
-    updateLyrics(getData(event));
     Window.Show();
+    updateLyrics(getData(event));
 });
-debugLog('taskbar-lyrics:show 监听器已注册');
 
 Events.On("taskbar-lyrics:hide", () => {
-    debugLog('收到隐藏事件');
     Window.Hide();
 });
 
 Events.On("taskbar-lyrics:reset", () => {
-    debugLog('收到重置事件');
     lyricWords = [];
     lyricWordText = [];
     lyricStartTimes = [];
@@ -200,6 +146,5 @@ Events.On("taskbar-lyrics:reset", () => {
     lyricKey = '';
     lyricClockStart = 0;
     lastRenderedTime = 0;
-    songInfo.textContent = "";
     lyricsText.textContent = placeholder;
 });
