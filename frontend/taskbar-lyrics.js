@@ -4,18 +4,19 @@ console.log('[TaskbarLyrics] 页面脚本开始执行');
 
 const songInfo = document.getElementById("songInfo");
 const lyricsText = document.getElementById("lyricsText");
-const playedText = document.getElementById("playedText");
-const remainingText = document.getElementById("remainingText");
 const placeholder = "♪ ♫ ♪ ♫";
 let animationFrame = 0;
 let lyricWords = [];
+let lyricWordText = [];
+let lyricStartTimes = [];
+let activeWordIndex = -1;
 let lyricStartTime = 0;
 let lyricClockStart = 0;
 let lyricKey = '';
 let lastRenderedTime = 0;
 let animationTickCount = 0;
 let lastAnimationLogAt = 0;
-let lastRenderedProgress = '';
+let lastPlayedCount = -1;
 
 function debugLog(message, data = undefined) {
     if (data === undefined) {
@@ -50,32 +51,32 @@ function parseKRCWords(rawText) {
 }
 
 function renderWordProgress(currentTime) {
-    if (!lyricWords.length) {
-        debugLog('跳过渲染：没有歌词字数据');
-        return;
-    }
-    if (!playedText || !remainingText) {
-        debugLog('跳过渲染：找不到 playedText/remainingText DOM', {
-            playedText: !!playedText,
-            remainingText: !!remainingText,
-            lyricsText: !!lyricsText
-        });
-        return;
+    if (!lyricWords.length || !lyricsText) return;
+
+    let nextIndex = activeWordIndex;
+    while (nextIndex + 1 < lyricStartTimes.length && currentTime >= lyricStartTimes[nextIndex + 1]) {
+        nextIndex += 1;
     }
 
-    const played = lyricWords.filter((word) => currentTime >= Number(word.endTime || word.startTime || 0)).map((word) => word.text || '').join('');
-    const remaining = lyricWords.filter((word) => currentTime < Number(word.endTime || word.startTime || 0)).map((word) => word.text || '').join('');
-    const progress = `${played}|${remaining}`;
-    playedText.textContent = played;
-    remainingText.textContent = remaining;
+    if (nextIndex !== activeWordIndex) {
+        for (let index = activeWordIndex + 1; index < nextIndex; index += 1) {
+            lyricsText.children[index]?.style.setProperty('--word-progress', '1');
+        }
+        activeWordIndex = nextIndex;
+    }
 
-    if (progress !== lastRenderedProgress) {
-        lastRenderedProgress = progress;
-        debugLog('DOM 已更新', {
-            currentTime: Number(currentTime.toFixed(3)),
-            played,
-            remaining
-        });
+    const span = lyricsText.children[activeWordIndex];
+    if (span && activeWordIndex >= 0) {
+        const word = lyricWords[activeWordIndex];
+        const start = Number(word.startTime || 0);
+        const end = Math.max(start, Number(word.endTime || start));
+        const progress = currentTime <= start ? 0 : Math.min(1, (currentTime - start) / (end - start || 1));
+        span.style.setProperty('--word-progress', `${progress}`);
+    }
+
+    if (activeWordIndex !== lastPlayedCount) {
+        lastPlayedCount = activeWordIndex;
+        debugLog('DOM 已更新', { currentTime: Number(currentTime.toFixed(3)), activeIndex: activeWordIndex });
     }
 }
 
@@ -109,8 +110,7 @@ function updateLyrics(data) {
         songName,
         artist: String(data.artist || '').trim(),
         currentTime: data.currentTime,
-        wordCount: Array.isArray(data.words) ? data.words.length : 0,
-        hasPlayedText: data.playedText !== undefined
+        wordCount: Array.isArray(data.words) ? data.words.length : 0
     });
     const artist = String(data.artist || "").trim();
     const rawLyricsText = String(data.lyricsText || '');
@@ -128,9 +128,21 @@ function updateLyrics(data) {
         const nextKey = `${songName}|${artist}|${nextWords.map((word) => `${word.startTime}:${word.endTime}:${word.text}`).join('|')}`;
         const nextTime = Number(data.currentTime || 0);
         const isNewLine = nextKey !== lyricKey;
+        if (isNewLine) {
+            lyricsText.replaceChildren(...nextWords.map((word) => {
+                const span = document.createElement('span');
+                span.className = 'lyric-word';
+                span.textContent = word.text || '';
+                return span;
+            }));
+        }
         const isSeek = Math.abs(nextTime - lastRenderedTime) > 0.8;
 
         lyricWords = nextWords;
+        lyricWordText = nextWords.map((word) => word.text || '');
+        lastPlayedCount = -1;
+        activeWordIndex = -1;
+        lyricStartTimes = nextWords.map((word) => Number(word.startTime || 0));
         if (isNewLine || isSeek || !lyricClockStart) {
             lyricStartTime = nextTime;
             lyricClockStart = performance.now();
@@ -148,17 +160,9 @@ function updateLyrics(data) {
             renderWordProgress(nextTime);
         }
     }
-    if (playedText && remainingText) {
-        if (data.playedText !== undefined || data.remainingText !== undefined) {
-            playedText.textContent = String(data.playedText || '');
-            remainingText.textContent = String(data.remainingText || '');
-        } else if (!lyricWords.length) {
-            remainingText.textContent = text;
-        }
-        return;
+    if (!eventWords.length) {
+        lyricsText.textContent = text;
     }
-
-    lyricsText.textContent = text;
 }
 
 Events.On("taskbar-lyrics:update", (event) => {
@@ -170,11 +174,9 @@ debugLog('taskbar-lyrics:update 监听器已注册');
 animationFrame = requestAnimationFrame(animateLyrics);
 debugLog('requestAnimationFrame 已启动', { animationFrame });
 debugLog('DOM 初始化状态', {
-    songInfo: !!songInfo,
-    lyricsText: !!lyricsText,
-    playedText: !!playedText,
-    remainingText: !!remainingText
-});
+        songInfo: !!songInfo,
+        lyricsText: !!lyricsText
+    });
 
 Events.On("taskbar-lyrics:show", (event) => {
     debugLog('收到显示事件');
@@ -191,14 +193,13 @@ Events.On("taskbar-lyrics:hide", () => {
 Events.On("taskbar-lyrics:reset", () => {
     debugLog('收到重置事件');
     lyricWords = [];
+    lyricWordText = [];
+    lyricStartTimes = [];
+    activeWordIndex = -1;
+    lastPlayedCount = -1;
     lyricKey = '';
     lyricClockStart = 0;
     lastRenderedTime = 0;
     songInfo.textContent = "";
-    if (playedText && remainingText) {
-        playedText.textContent = "";
-        remainingText.textContent = placeholder;
-    } else {
-        lyricsText.textContent = placeholder;
-    }
+    lyricsText.textContent = placeholder;
 });
