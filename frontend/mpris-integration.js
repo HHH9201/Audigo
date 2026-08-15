@@ -80,16 +80,19 @@ class MPRISIntegration {
             return;
         }
         
-        // 监听歌曲变化
-        if (window.PlaylistManager) {
-            const originalSetCurrentSong = window.PlaylistManager.setCurrentSong;
-            if (originalSetCurrentSong) {
-                window.PlaylistManager.setCurrentSong = (song) => {
-                    const result = originalSetCurrentSong.call(window.PlaylistManager, song);
+        // 监听歌曲变化和播放器状态变化
+        document.addEventListener('songInfoUpdated', (event) => {
+            this.onSongChanged(event.detail);
+        });
+
+        const audioElement = document.querySelector('audio');
+        if (audioElement) {
+            audioElement.addEventListener('loadedmetadata', () => {
+                const song = window.PlaylistManager?.getCurrentSong?.();
+                if (song) {
                     this.onSongChanged(song);
-                    return result;
-                };
-            }
+                }
+            });
         }
         
         // 监听音量变化

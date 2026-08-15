@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // SettingsService 设置服务
-type SettingsService struct{}
+type SettingsService struct {
+	mutex sync.Mutex
+}
 
 // NewSettingsService 创建设置服务实例
 func NewSettingsService() *SettingsService {
@@ -69,12 +72,12 @@ type DownloadSettings struct {
 
 // HotkeysSettings 快捷键设置
 type HotkeysSettings struct {
-	PlayPause     string `json:"playPause"`
-	NextTrack     string `json:"nextTrack"`
-	PrevTrack     string `json:"prevTrack"`
-	VolumeUp      string `json:"volumeUp"`
-	VolumeDown    string `json:"volumeDown"`
-	ToggleLyrics  string `json:"toggleLyrics"`
+	PlayPause    string `json:"playPause"`
+	NextTrack    string `json:"nextTrack"`
+	PrevTrack    string `json:"prevTrack"`
+	VolumeUp     string `json:"volumeUp"`
+	VolumeDown   string `json:"volumeDown"`
+	ToggleLyrics string `json:"toggleLyrics"`
 }
 
 // PrivacySettings 隐私设置
@@ -86,7 +89,7 @@ type PrivacySettings struct {
 
 // BehaviorSettings 应用行为设置
 type BehaviorSettings struct {
-	CloseAction    string `json:"closeAction"`    // "ask", "minimize", "exit"
+	CloseAction    string `json:"closeAction"` // "ask", "minimize", "exit"
 	StartMinimized bool   `json:"startMinimized"`
 	AutoStart      bool   `json:"autoStart"`
 }
@@ -97,14 +100,14 @@ func (s *SettingsService) getSettingsPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("无法获取用户主目录: %v", err)
 	}
-	
+
 	configDir := filepath.Join(homeDir, ".config", "gomusic")
-	
+
 	// 确保配置目录存在
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return "", fmt.Errorf("无法创建配置目录: %v", err)
 	}
-	
+
 	return filepath.Join(configDir, "settings.json"), nil
 }
 
@@ -167,7 +170,7 @@ func (s *SettingsService) LoadSettings() (*ApiResponse[Settings], error) {
 			Message: err.Error(),
 		}, err
 	}
-	
+
 	// 如果文件不存在，返回默认设置
 	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
 		defaultSettings := s.getDefaultSettings()
@@ -177,7 +180,7 @@ func (s *SettingsService) LoadSettings() (*ApiResponse[Settings], error) {
 			Data:    defaultSettings,
 		}, nil
 	}
-	
+
 	// 读取设置文件
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
@@ -186,7 +189,7 @@ func (s *SettingsService) LoadSettings() (*ApiResponse[Settings], error) {
 			Message: fmt.Sprintf("读取设置文件失败: %v", err),
 		}, err
 	}
-	
+
 	var settings Settings
 	if err := json.Unmarshal(data, &settings); err != nil {
 		// 如果解析失败，返回默认设置
@@ -197,7 +200,7 @@ func (s *SettingsService) LoadSettings() (*ApiResponse[Settings], error) {
 			Data:    defaultSettings,
 		}, nil
 	}
-	
+
 	return &ApiResponse[Settings]{
 		Success: true,
 		Message: "设置加载成功",
@@ -207,6 +210,9 @@ func (s *SettingsService) LoadSettings() (*ApiResponse[Settings], error) {
 
 // SaveSettings 保存设置
 func (s *SettingsService) SaveSettings(settings Settings) (*ApiResponse[bool], error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	settingsPath, err := s.getSettingsPath()
 	if err != nil {
 		return &ApiResponse[bool]{
@@ -214,7 +220,7 @@ func (s *SettingsService) SaveSettings(settings Settings) (*ApiResponse[bool], e
 			Message: err.Error(),
 		}, err
 	}
-	
+
 	// 将设置序列化为JSON
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -223,15 +229,15 @@ func (s *SettingsService) SaveSettings(settings Settings) (*ApiResponse[bool], e
 			Message: fmt.Sprintf("序列化设置失败: %v", err),
 		}, err
 	}
-	
+
 	// 写入文件
-	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
+	if err := writeJSONAtomic(settingsPath, data, 0600); err != nil {
 		return &ApiResponse[bool]{
 			Success: false,
 			Message: fmt.Sprintf("保存设置文件失败: %v", err),
 		}, err
 	}
-	
+
 	return &ApiResponse[bool]{
 		Success: true,
 		Message: "设置保存成功",
@@ -248,7 +254,7 @@ func (s *SettingsService) GetSettingsPath() (*ApiResponse[string], error) {
 			Message: err.Error(),
 		}, err
 	}
-	
+
 	return &ApiResponse[string]{
 		Success: true,
 		Message: "获取设置路径成功",

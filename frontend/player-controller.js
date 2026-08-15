@@ -162,17 +162,7 @@ async function playCurrentSong() {
 
             // 等待30秒后自动播放下一首
             console.log('🎵 播放地址获取失败，30秒后自动播放下一首');
-            setTimeout(async () => {
-                console.log('🎵 开始自动播放下一首（播放地址获取失败）');
-                try {
-                    const success = await playNextSong();
-                    if (!success) {
-                        console.warn('⚠️ 自动播放下一首失败，可能已到播放列表末尾');
-                    }
-                } catch (error) {
-                    console.error('❌ 自动播放下一首时出错:', error);
-                }
-            }, 30000);
+            schedulePlaybackFailureNext();
 
             return false;
         }
@@ -226,17 +216,7 @@ async function playCurrentSong() {
 
             // 等待30秒后自动播放下一首
             console.log('🎵 播放器播放失败，30秒后自动播放下一首');
-            setTimeout(async () => {
-                console.log('🎵 开始自动播放下一首（播放器播放失败）');
-                try {
-                    const success = await playNextSong();
-                    if (!success) {
-                        console.warn('⚠️ 自动播放下一首失败，可能已到播放列表末尾');
-                    }
-                } catch (error) {
-                    console.error('❌ 自动播放下一首时出错:', error);
-                }
-            }, 30000);
+            schedulePlaybackFailureNext();
         }
 
         if (!success) {
@@ -429,7 +409,8 @@ function stopPlaying() {
         window.currentLyricsLines = [];
     }
     if (window.currentActiveLyricsIndex !== undefined) {
-        window.currentActiveLyricsIndex = -1;
+        window.currentAc
+    cancelPlaybackFailureTimer();tiveLyricsIndex = -1;
     }
 
     // 清除歌词高亮
@@ -444,6 +425,8 @@ function cleanupPlayerController() {
     // 停止播放
     stopPlaying();
     
+    cancelPlaybackFailureTimer();
+
     // 清理全局引用
     if (window.PlayerController) {
         window.PlayerController = null;

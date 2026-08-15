@@ -23,10 +23,10 @@ func GetCookieFilePath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("获取用户主目录失败: %v", err)
 	}
-	
+
 	configDir := filepath.Join(homeDir, ".config", "gomusic")
 	cookieFile := filepath.Join(configDir, "cookies.txt")
-	
+
 	return cookieFile, nil
 }
 
@@ -34,24 +34,24 @@ func GetCookieFilePath() (string, error) {
 func (cm *CookieManager) LoadCookieFromFile() error {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
-	
+
 	cookieFile, err := GetCookieFilePath()
 	if err != nil {
 		return err
 	}
-	
+
 	// 检查文件是否存在
 	if _, err := os.Stat(cookieFile); os.IsNotExist(err) {
 		cm.cookie = ""
 		return nil // 文件不存在不算错误，只是没有cookie
 	}
-	
+
 	// 读取文件内容
 	content, err := os.ReadFile(cookieFile)
 	if err != nil {
 		return fmt.Errorf("读取cookie文件失败: %v", err)
 	}
-	
+
 	cm.cookie = strings.TrimSpace(string(content))
 	return nil
 }
@@ -77,24 +77,24 @@ func (cm *CookieManager) SaveCookieToFile(token string, userid int64) error {
 	if err != nil {
 		return err
 	}
-	
+
 	// 确保目录存在
 	configDir := filepath.Dir(cookieFile)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("创建配置目录失败: %v", err)
 	}
-	
+
 	// 构建cookie内容
 	cookieContent := fmt.Sprintf("token=%s;userid=%d", token, userid)
-	
+
 	// 写入文件
-	if err := os.WriteFile(cookieFile, []byte(cookieContent), 0644); err != nil {
+	if err := writeJSONAtomic(cookieFile, []byte(cookieContent), 0600); err != nil {
 		return fmt.Errorf("写入cookie文件失败: %v", err)
 	}
-	
+
 	// 更新内存中的cookie
 	cm.SetCookie(cookieContent)
-	
+
 	return nil
 }
 
@@ -102,22 +102,22 @@ func (cm *CookieManager) SaveCookieToFile(token string, userid int64) error {
 func (cm *CookieManager) ClearCookie() error {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
-	
+
 	// 清除内存中的cookie
 	cm.cookie = ""
-	
+
 	// 删除cookie文件
 	cookieFile, err := GetCookieFilePath()
 	if err != nil {
 		return err
 	}
-	
+
 	if _, err := os.Stat(cookieFile); err == nil {
 		if err := os.Remove(cookieFile); err != nil {
 			return fmt.Errorf("删除cookie文件失败: %v", err)
 		}
 	}
-	
+
 	return nil
 }
 

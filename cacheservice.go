@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -20,13 +21,14 @@ import (
 
 // CacheService 音频缓存服务（包含OSD歌词功能）
 type CacheService struct {
-	server        *http.Server
-	cacheDir      string
-	mp3Dir        string
-	serverPort    string
-	localMusicMap map[string]string // 本地音乐hash到文件路径的映射
-	localMapFile  string            // 本地音乐映射文件路径
-	downloadLocks sync.Map          // songHash -> *sync.Mutex
+	server             *http.Server
+	cacheDir           string
+	mp3Dir             string
+	serverPort         string
+	localMusicMap      map[string]string // 本地音乐hash到文件路径的映射
+	localMusicMapMutex sync.RWMutex
+	localMapFile       string   // 本地音乐映射文件路径
+	downloadLocks      sync.Map // songHash -> *sync.Mutex
 	// OSD歌词相关字段
 	osdClients sync.Map // 使用 sync.Map 管理客户端: *http.Request -> chan LyricsMessage
 	// OSD歌词进程管理
@@ -569,8 +571,8 @@ func (c *CacheService) handleAudioProxy(w http.ResponseWriter, r *http.Request) 
 	}
 
 	targetURL, err := url.Parse(remoteURL)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("invalid remote url: %v", err), http.StatusBadRequest)
+	if err != nil || !isAllowedAudioProxyURL(targetURL) {
+		http.Error(w, "remote url is not allowed", http.StatusBadRequest)
 		return
 	}
 
@@ -601,6 +603,25 @@ func (c *CacheService) handleAudioProxy(w http.ResponseWriter, r *http.Request) 
 	}
 
 	proxy.ServeHTTP(w, r)
+}
+
+func isAllowedAudioProxyURL(targetURL *url.URL) bool {
+	if targetURL == nil || (targetURL.Scheme != "http" && targetURL.Scheme != "https") || targetURL.User != nil {
+		return false
+	}
+
+	host := strings.ToLower(targetURL.Hostname())
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast()
+	}
+
+	return host == "kugou.com" || strings.HasSuffix(host, ".kugou.com") ||
+		host == "kugoucdn.com" || strings.HasSuffix(host, ".kugoucdn.com") ||
+		host == "kgimg.com" || strings.HasSuffix(host, ".kgimg.com")
 }
 
 // CacheAudioFile 缓存音频文件（供前端调用）
@@ -683,6 +704,8 @@ func (c *CacheService) GetCachedURL(songHash, quality string) CacheResponse {
 
 // RegisterLocalMusic 注册本地音乐hash到文件路径的映射（供前端调用）
 func (c *CacheService) RegisterLocalMusic(localHash, filePath string) CacheResponse {
+	localHash = strings.TrimSpace(localHash)
+	filePath = strings.TrimSpace(filePath)
 	if localHash == "" || filePath == "" {
 		return CacheResponse{
 			Success: false,
@@ -690,12 +713,15 @@ func (c *CacheService) RegisterLocalMusic(localHash, filePath string) CacheRespo
 		}
 	}
 
+	c.localMusicMapMutex.Lock()
 	if c.localMusicMap == nil {
 		c.localMusicMap = make(map[string]string)
 	}
-
 	c.localMusicMap[localHash] = filePath
+	c.localMusicMapMutex.Unlock()
 	log.Printf("🎵 注册本地音乐映射: %s -> %s\n", localHash, filePath)
+
+	// 保存映射到文件
 
 	// 保存映射到文件
 	if err := c.saveLocalMusicMap(); err != nil {
@@ -711,7 +737,9 @@ func (c *CacheService) RegisterLocalMusic(localHash, filePath string) CacheRespo
 // getLocalMusicURL 获取本地音乐的缓存URL
 func (c *CacheService) getLocalMusicURL(localHash string) CacheResponse {
 	// 从映射中查找文件路径
+	c.localMusicMapMutex.RLock()
 	filePath, exists := c.localMusicMap[localHash]
+	c.localMusicMapMutex.RUnlock()
 	if !exists {
 		return CacheResponse{
 			Success: false,
@@ -835,6 +863,7 @@ func (c *CacheService) loadLocalMusicMap() {
 		return
 	}
 
+	c.localMusicMapMutex.Lock()
 	if c.localMusicMap == nil {
 		c.localMusicMap = make(map[string]string)
 	}
@@ -849,6 +878,7 @@ func (c *CacheService) loadLocalMusicMap() {
 			log.Printf("🗑️ 清理无效的本地音乐映射: %s -> %s (文件不存在)\n", hash, filePath)
 		}
 	}
+	c.localMusicMapMutex.Unlock()
 
 	log.Printf("✅ 加载本地音乐映射成功: %d 个有效映射\n", validCount)
 
@@ -867,12 +897,14 @@ func (c *CacheService) saveLocalMusicMap() error {
 		return fmt.Errorf("创建缓存目录失败: %v", err)
 	}
 
+	c.localMusicMapMutex.RLock()
 	data, err := json.MarshalIndent(c.localMusicMap, "", "  ")
+	c.localMusicMapMutex.RUnlock()
 	if err != nil {
 		return fmt.Errorf("序列化本地音乐映射失败: %v", err)
 	}
 
-	if err := os.WriteFile(c.localMapFile, data, 0644); err != nil {
+	if err := writeJSONAtomic(c.localMapFile, data, 0600); err != nil {
 		return fmt.Errorf("写入本地音乐映射文件失败: %v", err)
 	}
 
@@ -931,7 +963,7 @@ func (c *CacheService) saveCacheNameMap() error {
 		return fmt.Errorf("序列化缓存文件名映射失败: %v", err)
 	}
 
-	if err := os.WriteFile(c.cacheNameMapFile, data, 0644); err != nil {
+	if err := writeJSONAtomic(c.cacheNameMapFile, data, 0600); err != nil {
 		return fmt.Errorf("写入缓存文件名映射失败: %v", err)
 	}
 

@@ -94,7 +94,7 @@ func (l *LocalMusicService) getCacheDir() (string, error) {
 	cacheDir := filepath.Join(homeDir, ".cache", "gomusic")
 
 	// 确保缓存目录存在
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return "", fmt.Errorf("创建缓存目录失败: %v", err)
 	}
 
@@ -586,7 +586,7 @@ func (l *LocalMusicService) cacheMusicFiles(musicFiles []LocalMusicFile) error {
 	}
 
 	// 写入缓存文件
-	return os.WriteFile(cacheFile, jsonData, 0644)
+	return writeJSONAtomic(cacheFile, jsonData, 0600)
 }
 
 // GetCachedMusicFiles 获取缓存的音乐文件
@@ -1062,12 +1062,37 @@ func (l *LocalMusicService) generateLocalMusicMappings(musicFiles []LocalMusicFi
 	return nil
 }
 
+func (l *LocalMusicService) isRegisteredLocalMusicPath(filePath string) bool {
+	cacheService := GetCacheService()
+	if cacheService == nil {
+		return false
+	}
+
+	cleanPath := filepath.Clean(filePath)
+	cacheService.localMusicMapMutex.RLock()
+	defer cacheService.localMusicMapMutex.RUnlock()
+
+	for _, registeredPath := range cacheService.localMusicMap {
+		if filepath.Clean(registeredPath) == cleanPath {
+			return true
+		}
+	}
+	return false
+}
+
 // GetAudioFileData 获取音频文件的二进制数据（保留兼容性）
 func (l *LocalMusicService) GetAudioFileData(filePath string) AudioFileResponse {
 	if filePath == "" {
 		return AudioFileResponse{
 			Success: false,
 			Message: "文件路径不能为空",
+		}
+	}
+
+	if !l.isRegisteredLocalMusicPath(filePath) {
+		return AudioFileResponse{
+			Success: false,
+			Message: "文件路径未注册",
 		}
 	}
 
@@ -1126,6 +1151,13 @@ func (l *LocalMusicService) GetLocalMusicLyrics(filePath string) CacheResponse {
 		}
 	}
 
+	if !l.isRegisteredLocalMusicPath(filePath) {
+		return CacheResponse{
+			Success: false,
+			Message: "文件路径未注册",
+		}
+	}
+
 	// 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return CacheResponse{
@@ -1166,6 +1198,13 @@ func (l *LocalMusicService) GetLocalAudioURL(filePath string) CacheResponse {
 		}
 	}
 
+	if !l.isRegisteredLocalMusicPath(filePath) {
+		return CacheResponse{
+			Success: false,
+			Message: "文件路径未注册",
+		}
+	}
+
 	// 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return CacheResponse{
@@ -1183,51 +1222,19 @@ func (l *LocalMusicService) GetLocalAudioURL(filePath string) CacheResponse {
 		}
 	}
 
-	// 获取文件扩展名
-	ext := strings.ToLower(filepath.Ext(filePath))
-
-	// 获取缓存目录
-	cacheDir, err := l.getCacheDir()
-	if err != nil {
+	cacheService := GetCacheService()
+	if cacheService == nil {
 		return CacheResponse{
 			Success: false,
-			Message: fmt.Sprintf("获取缓存目录失败: %v", err),
+			Message: "缓存服务不可用",
 		}
 	}
 
-	// 创建缓存文件路径
-	mp3Dir := filepath.Join(cacheDir, "cache", "mp3")
-	if err := os.MkdirAll(mp3Dir, 0755); err != nil {
-		return CacheResponse{
-			Success: false,
-			Message: fmt.Sprintf("创建缓存目录失败: %v", err),
-		}
+	response := cacheService.GetCachedURL("local-"+fileHash, "")
+	if response.Success {
+		response.Message = "获取本地音频URL成功"
 	}
-
-	// 缓存文件名：hash + 原始扩展名
-	cachedFileName := fileHash + ext
-	cachedFilePath := filepath.Join(mp3Dir, cachedFileName)
-
-	// 检查是否已经缓存
-	if _, err := os.Stat(cachedFilePath); os.IsNotExist(err) {
-		// 文件未缓存，复制到缓存目录
-		if err := l.copyFileToCache(filePath, cachedFilePath); err != nil {
-			return CacheResponse{
-				Success: false,
-				Message: fmt.Sprintf("复制文件到缓存失败: %v", err),
-			}
-		}
-		log.Printf("✅ 本地音乐文件已缓存: %s -> %s\n", filePath, cachedFilePath)
-	}
-
-	// 生成本地HTTP URL
-	localURL := fmt.Sprintf("http://127.0.0.1:18911/cache/mp3/%s", cachedFileName)
-
-	return CacheResponse{
-		Success: true,
-		Message: "获取本地音频URL成功",
-		Data:    localURL,
-	}
+	return response
 }
 
 // copyFileToCache 复制文件到缓存目录

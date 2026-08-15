@@ -257,13 +257,8 @@ func main() {
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
 
-		log.Printf("🔴 收到退出信号，清理OSD歌词进程...")
-		if cacheService != nil {
-			cacheService.stopOSDLyricsProcess()
-		}
-
-		// 退出程序
-		os.Exit(0)
+		log.Printf("🔴 收到退出信号，请求应用退出...")
+		app.Quit()
 	}()
 
 	// contextMenu := app.ContextMenu.New()

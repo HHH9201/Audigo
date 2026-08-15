@@ -743,7 +743,7 @@ window.setVolume = (value) => {
     if (volumeBtn) {
         if (vol === 0) {
             volumeBtn.className = 'fas fa-volume-mute';
-        } else if (vol < 0.5) {
+        } else if (vol < 0.7) {
             volumeBtn.className = 'fas fa-volume-down';
         } else {
             volumeBtn.className = 'fas fa-volume-up';

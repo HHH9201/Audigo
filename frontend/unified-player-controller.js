@@ -43,20 +43,23 @@ class UnifiedPlayerController {
     syncWithExistingPlayer() {
         if (window.audioPlayer && window.audioPlayer()) {
             const player = window.audioPlayer();
-            
-            // 同步音量
-            if (player.volume !== undefined) {
-                this.state.volume = Math.round(player.volume * 100);
-            } else if (player.audio && player.audio.volume !== undefined) {
-                this.state.volume = Math.round(player.audio.volume * 100);
+            const audio = player.audio;
+
+            // 同步播放状态和原生静音状态
+            if (audio) {
+                this.state.isPlaying = !audio.paused;
+                this.state.currentTime = audio.currentTime || 0;
+                this.state.duration = audio.duration || 0;
+                this.state.isMuted = audio.muted;
             }
-            
-            // 同步播放状态
-            if (player.audio) {
-                this.state.isPlaying = !player.audio.paused;
-                this.state.currentTime = player.audio.currentTime || 0;
-                this.state.duration = player.audio.duration || 0;
-                this.state.isMuted = player.audio.muted || false;
+
+            // 静音时保留界面音量值，不从实际音量同步为 0
+            if (!this.state.isMuted) {
+                if (player.volume !== undefined) {
+                    this.state.volume = Math.round(player.volume * 100);
+                } else if (audio && audio.volume !== undefined) {
+                    this.state.volume = Math.round(audio.volume * 100);
+                }
             }
             
             // 同步当前歌曲
@@ -93,6 +96,9 @@ class UnifiedPlayerController {
             } else if (player.audio) {
                 player.audio.volume = volume / 100;
             }
+            if (volume > 0 && player.audio) {
+                player.audio.muted = false;
+            }
         }
         
         // 如果从静音状态恢复，取消静音
@@ -115,17 +121,23 @@ class UnifiedPlayerController {
     }
     
     toggleMute() {
+        const player = window.audioPlayer && window.audioPlayer();
+        const audio = player && player.audio;
+
         if (this.state.isMuted) {
-            // 取消静音，恢复之前的音量
             this.state.isMuted = false;
-            this.setVolume(this.state.lastVolume);
+            if (audio) {
+                audio.muted = false;
+                audio.volume = this.state.lastVolume / 100;
+            }
         } else {
-            // 静音，保存当前音量
-            this.state.lastVolume = this.state.volume;
+            this.state.lastVolume = this.state.volume || this.state.lastVolume || 50;
             this.state.isMuted = true;
-            this.setVolume(0);
+            if (audio) {
+                audio.muted = true;
+            }
         }
-        
+
         this.emit('muteStateChanged', this.state.isMuted);
         console.log('🔇 静音状态:', this.state.isMuted ? '开启' : '关闭');
     }

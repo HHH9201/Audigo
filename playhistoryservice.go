@@ -7,11 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 )
 
 // PlayHistoryService 播放历史服务
-type PlayHistoryService struct{}
+type PlayHistoryService struct {
+	mutex sync.Mutex
+}
 
 // PlayHistoryRecord 播放历史记录
 type PlayHistoryRecord struct {
@@ -68,7 +71,7 @@ func (p *PlayHistoryService) getCacheDir() (string, error) {
 	cacheDir := filepath.Join(homeDir, ".cache", "gomusic")
 
 	// 确保缓存目录存在
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return "", fmt.Errorf("创建缓存目录失败: %v", err)
 	}
 
@@ -134,7 +137,7 @@ func (p *PlayHistoryService) savePlayHistory(historyData *PlayHistoryData) error
 	}
 
 	// 写入文件
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := writeJSONAtomic(filePath, data, 0600); err != nil {
 		return fmt.Errorf("写入播放历史文件失败: %v", err)
 	}
 
@@ -143,6 +146,9 @@ func (p *PlayHistoryService) savePlayHistory(historyData *PlayHistoryData) error
 
 // AddPlayHistory 添加播放历史记录
 func (p *PlayHistoryService) AddPlayHistory(request AddPlayHistoryRequest) PlayHistoryResponse {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
 	log.Printf("🎵 后端处理播放历史: %s - %s\n", request.SongName, request.ArtistName)
 
 	if request.Hash == "" {
@@ -318,7 +324,10 @@ func (p *PlayHistoryService) isSameDay(t1, t2 time.Time) bool {
 
 // ClearPlayHistory 清空播放历史
 func (p *PlayHistoryService) ClearPlayHistory() PlayHistoryResponse {
-	// 创建空的播放历史数据
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	// 获取历史记录文件路径创建空的播放历史数据
 	emptyData := &PlayHistoryData{
 		Records:    []PlayHistoryRecord{},
 		TotalCount: 0,

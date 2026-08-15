@@ -458,35 +458,6 @@ class HTML5AudioPlayer {
       } else {
         console.error("❌ 所有播放地址都失败了");
 
-        // 等待30秒后自动播放下一首
-        console.log("🎵 所有播放地址都失败，30秒后自动播放下一首");
-        // 🔧 内存泄漏修复：使用资源管理器管理定时器
-        const addTimer = (callback, delay) => {
-          if (this.resourceManager) {
-            return this.resourceManager.addTimer(callback, delay);
-          } else if (window.GlobalResourceManager) {
-            return window.GlobalResourceManager.addTimer(callback, delay);
-          } else {
-            return setTimeout(callback, delay);
-          }
-        };
-
-        addTimer(async () => {
-          console.log("🎵 开始自动播放下一首（所有播放地址失败）");
-          try {
-            if (window.PlayerController && window.PlayerController.playNext) {
-              const success = await window.PlayerController.playNext();
-              if (!success) {
-                console.warn("⚠️ 自动播放下一首失败，可能已到播放列表末尾");
-              }
-            } else {
-              console.error("❌ PlayerController 不可用，无法自动播放下一首");
-            }
-          } catch (error) {
-            console.error("❌ 自动播放下一首时出错:", error);
-          }
-        }, 30000);
-
         if (this.onErrorCallback) this.onErrorCallback();
         return false;
       }
@@ -780,23 +751,49 @@ function setupPlayerEventListeners() {
   }
 
   // 音量控制 - 使用统一控制器
+  const volumeButton = document.querySelector(".player-bar .volume-btn");
+  const volumePercentage = document.querySelector(".player-bar .volume-percentage");
+  const setBottomVolume = (volume) => {
+    const nextVolume = Math.max(0, Math.min(100, Math.round(volume)));
+    volumeSlider.value = nextVolume;
+    if (window.UnifiedPlayerController) {
+      window.UnifiedPlayerController.setVolume(nextVolume);
+    } else {
+      const volumeDecimal = nextVolume / 100;
+      if (audioPlayer) {
+        audioPlayer.setVolume(volumeDecimal);
+      }
+      if (window.setVolume) {
+        window.setVolume(volumeDecimal);
+      }
+    }
+    if (volumePercentage) {
+      volumePercentage.textContent = `${nextVolume}%`;
+    }
+  };
+
+  if (volumeButton) {
+    volumeButton.addEventListener("click", () => {
+      if (window.UnifiedPlayerController) {
+        window.UnifiedPlayerController.toggleMute();
+      }
+    });
+  }
+
   if (volumeSlider) {
     volumeSlider.addEventListener("input", (e) => {
-      const volume = parseInt(e.target.value);
-      if (window.UnifiedPlayerController) {
-        window.UnifiedPlayerController.setVolume(volume);
-      } else {
-        // 降级处理
-        const volumeDecimal = volume / 100;
-        if (audioPlayer) {
-          audioPlayer.setVolume(volumeDecimal);
-        }
-        if (window.setVolume) {
-          window.setVolume(volumeDecimal);
-        }
-      }
-      console.log("🔊 底栏播放器音量调整为:", volume + "%");
+      setBottomVolume(parseInt(e.target.value, 10));
+      console.log("🔊 底栏播放器音量调整为:", e.target.value + "%");
     });
+  }
+
+  const volumePopover = document.querySelector(".player-bar .volume-popover");
+  if (volumePopover) {
+    volumePopover.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const currentVolume = parseInt(volumeSlider.value, 10) || 0;
+      setBottomVolume(currentVolume + (e.deltaY < 0 ? 5 : -5));
+    }, { passive: false });
   }
 
   // 进度条点击 - 绑定到进度条本身而不是容器
@@ -958,31 +955,9 @@ function setupPlayerCallbacks() {
     console.error("🎵 播放器错误");
     updatePlayerBar();
 
-    // 等待30秒后自动播放下一首
-    console.log("🎵 播放器错误，30秒后自动播放下一首");
-    // 🔧 内存泄漏修复：使用全局资源管理器管理定时器
-    const addTimer = (callback, delay) => {
-      if (window.GlobalResourceManager) {
-        return window.GlobalResourceManager.addTimer(callback, delay);
-      } else {
-        return setTimeout(callback, delay);
-      }
-    };
-    addTimer(async () => {
-      console.log("🎵 开始自动播放下一首（播放器错误）");
-      try {
-        if (window.PlayerController && window.PlayerController.playNext) {
-          const success = await window.PlayerController.playNext();
-          if (!success) {
-            console.warn("⚠️ 自动播放下一首失败，可能已到播放列表末尾");
-          }
-        } else {
-          console.error("❌ PlayerController 不可用，无法自动播放下一首");
-        }
-      } catch (error) {
-        console.error("❌ 自动播放下一首时出错:", error);
-      }
-    }, 30000);
+    if (window.setPlayerErrorState) {
+      window.setPlayerErrorState("播放器发生错误，正在处理播放地址");
+    }
   });
 
   // 时间更新回调
@@ -1242,12 +1217,13 @@ window.formatSongInfo = function (song) {
 
   return {
     songname:
-      song.songname || song.title || song.name || song.filename || "未知歌曲",
-    author_name: song.author_name || "未知艺术家",
-    album_name: song.album_name || "未知专辑",
-    union_cover: song.union_cover || "",
-    hash: song.hash || "",
-    time_length: song.time_length || 0,
+      song.songname || song.songName || song.song_name || song.title || song.audio_name || song.name || song.filename || "未知歌曲",
+    author_name:
+      song.author_name || song.authorName || song.artist || song.singer_name || song.singer || "未知艺术家",
+    album_name: song.album_name || song.album || "未知专辑",
+    union_cover: song.union_cover || song.unionCover || song.cover || "",
+    hash: song.hash || song.Hash || "",
+    time_length: parseInt(song.time_length || song.timeLength || song.duration) || 0,
   };
 };
 
@@ -1455,7 +1431,7 @@ function updateVolumeIcon(volume) {
     } else if (volume < 0.4) {
       volumeIcon.className = "fas fa-volume-down";
     } else if (volume < 0.7) {
-      volumeIcon.className = "fas fa-volume";
+      volumeIcon.className = "fas fa-volume-down";
     } else {
       volumeIcon.className = "fas fa-volume-up";
     }
@@ -1480,6 +1456,10 @@ function setupUnifiedControllerListeners() {
     if (volumeSlider) {
       volumeSlider.value = data.volume;
     }
+    const volumePercentage = document.querySelector(".player-bar .volume-percentage");
+    if (volumePercentage) {
+      volumePercentage.textContent = `${data.volume}%`;
+    }
 
     // 更新音量图标
     updateVolumeIcon(data.volume / 100);
@@ -1488,7 +1468,7 @@ function setupUnifiedControllerListeners() {
   // 监听静音状态变化
   window.UnifiedPlayerController.on("muteStateChanged", (isMuted) => {
     console.log(
-      "🔇 底栏播放器收到静音状态变化:",
+      "🔇 底栏播放器收到音量状态变化:",
       isMuted ? "静音" : "取消静音",
     );
     updateVolumeIcon(

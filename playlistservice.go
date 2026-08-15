@@ -7,11 +7,14 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
 // PlaylistService 播放列表服务
-type PlaylistService struct{}
+type PlaylistService struct {
+	mutex sync.Mutex
+}
 
 // PlayerPlaylistData 播放器播放列表数据结构
 type PlayerPlaylistData struct {
@@ -146,7 +149,7 @@ func (p *PlaylistService) savePlaylist(playlistData *PlayerPlaylistData) error {
 	}
 
 	// 写入文件
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := writeJSONAtomic(filePath, data, 0600); err != nil {
 		return fmt.Errorf("写入播放列表文件失败: %v", err)
 	}
 
@@ -276,7 +279,9 @@ func (p *PlaylistService) SetPlaylist(request SetPlaylistRequest) PlayerPlaylist
 
 // AddToPlaylist 添加歌曲到播放列表
 func (p *PlaylistService) AddToPlaylist(request AddToPlaylistRequest) PlayerPlaylistResponse {
-	// 加载现有播放列表
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
 	playlistData, err := p.loadPlaylist()
 	if err != nil {
 		return PlayerPlaylistResponse{
@@ -331,6 +336,9 @@ func (p *PlaylistService) AddToPlaylist(request AddToPlaylistRequest) PlayerPlay
 
 // RemoveFromPlaylist 从播放列表移除歌曲
 func (p *PlaylistService) RemoveFromPlaylist(hash string) PlayerPlaylistResponse {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
 	if hash == "" {
 		return PlayerPlaylistResponse{
 			Success: false,
@@ -396,6 +404,8 @@ func (p *PlaylistService) RemoveFromPlaylist(hash string) PlayerPlaylistResponse
 
 // SetCurrentIndex 设置当前播放索引
 func (p *PlaylistService) SetCurrentIndex(index int) PlayerPlaylistResponse {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
 	// 加载现有播放列表
 	playlistData, err := p.loadPlaylist()
 	if err != nil {
@@ -548,6 +558,9 @@ func (p *PlaylistService) GetNextSong() PlayerPlaylistResponse {
 
 // GetPreviousSong 获取上一首歌曲
 func (p *PlaylistService) GetPreviousSong() PlayerPlaylistResponse {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
 	// 加载现有播放列表
 	playlistData, err := p.loadPlaylist()
 	if err != nil {
@@ -611,6 +624,9 @@ func (p *PlaylistService) GetPreviousSong() PlayerPlaylistResponse {
 
 // ClearPlaylist 清空播放列表
 func (p *PlaylistService) ClearPlaylist() PlayerPlaylistResponse {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
 	// 创建空的播放列表数据
 	emptyData := &PlayerPlaylistData{
 		Songs:        []PlayerPlaylistSong{},

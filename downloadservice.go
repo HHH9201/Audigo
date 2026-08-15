@@ -8,11 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 )
 
 // DownloadService 下载服务
-type DownloadService struct{}
+type DownloadService struct {
+	mutex sync.Mutex
+}
 
 // NewDownloadService 创建下载服务实例
 func NewDownloadService() *DownloadService {
@@ -71,7 +74,7 @@ func (d *DownloadService) getDownloadRecordsFilePath() (string, error) {
 	}
 
 	appDir := filepath.Join(homeDir, ".wg-music")
-	if err := os.MkdirAll(appDir, 0755); err != nil {
+	if err := os.MkdirAll(appDir, 0700); err != nil {
 		return "", err
 	}
 
@@ -120,11 +123,14 @@ func (d *DownloadService) saveDownloadRecords(data *DownloadRecordsData) error {
 		return err
 	}
 
-	return os.WriteFile(filePath, jsonData, 0644)
+	return writeJSONAtomic(filePath, jsonData, 0600)
 }
 
 // AddDownloadRecord 添加下载记录
 func (d *DownloadService) AddDownloadRecord(request AddDownloadRecordRequest) DownloadRecordsResponse {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
 	if request.Hash == "" {
 		return DownloadRecordsResponse{
 			Success: false,
@@ -243,6 +249,9 @@ func (d *DownloadService) GetDownloadRecords(request GetDownloadRecordsRequest) 
 
 // DeleteDownloadRecord 删除下载记录
 func (d *DownloadService) DeleteDownloadRecord(request DeleteDownloadRecordRequest) DownloadRecordsResponse {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
 	if request.Hash == "" {
 		return DownloadRecordsResponse{
 			Success: false,
@@ -288,6 +297,9 @@ func (d *DownloadService) DeleteDownloadRecord(request DeleteDownloadRecordReque
 
 // ClearDownloadRecords 清空下载记录
 func (d *DownloadService) ClearDownloadRecords() DownloadRecordsResponse {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
 	data := &DownloadRecordsData{
 		Records:    []DownloadRecord{},
 		TotalCount: 0,

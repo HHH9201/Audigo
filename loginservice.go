@@ -91,7 +91,7 @@ func saveLoginMethodToFile(loginMethod string) error {
 	configDir := filepath.Join(homeDir, ".config", "gomusic")
 
 	// 确保目录存在
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("创建配置目录失败: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func saveLoginMethodToFile(loginMethod string) error {
 	loginMethodFile := filepath.Join(configDir, "login_method.txt")
 
 	// 写入文件
-	if err := os.WriteFile(loginMethodFile, []byte(loginMethod), 0644); err != nil {
+	if err := writeJSONAtomic(loginMethodFile, []byte(loginMethod), 0600); err != nil {
 		return fmt.Errorf("写入登录方式文件失败: %v", err)
 	}
 

@@ -2681,9 +2681,39 @@ h1 {
 }
 
 .volume-control {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 10px;
+    height: 32px;
+}
+
+.volume-popover {
+    position: absolute;
+    right: -8px;
+    bottom: 30px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 7px 6px;
+    border-radius: 8px;
+    background: var(--card-bg, rgba(24, 24, 32, 0.96));
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(6px);
+    transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease;
+    pointer-events: none;
+    z-index: 20;
+}
+
+.volume-control:hover .volume-popover,
+.volume-control:focus-within .volume-popover {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
 }
 
 .volume-btn {
@@ -2693,8 +2723,8 @@ h1 {
 }
 
 .volume-slider {
-    width: 80px;
-    height: 4px;
+    width: 3px;
+    height: 56px;
     background: rgba(255, 255, 255, 0.2);
     border-radius: 2px;
     outline: none;
@@ -2702,25 +2732,35 @@ h1 {
     --wails-draggable: no-drag;
     -webkit-appearance: none;
     appearance: none;
+    writing-mode: vertical-lr;
+    direction: rtl;
 }
 
 .volume-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     background: rgb(139, 92, 246);
     border-radius: 50%;
     cursor: pointer;
 }
 
 .volume-slider::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     background: rgb(139, 92, 246);
     border-radius: 50%;
     cursor: pointer;
     border: none;
+}
+
+.volume-percentage {
+    min-width: 32px;
+    color: var(--text-color, #fff);
+    font-size: 11px;
+    line-height: 1;
+    text-align: center;
 }
 
 /* 播放器额外控制按钮 */

@@ -75,14 +75,14 @@ async function setPlaylist(songs, currentIndex = 0, name = '播放列表', clear
         // 转换歌曲格式
         const playlistSongs = songs.map((song, index) => {
             const convertedSong = {
-                hash: song.hash || '',
-                songname: song.songname || '',
+                hash: song.hash || song.Hash || '',
+                songname: song.songname || song.songName || song.song_name || song.title || song.audio_name || song.name || song.filename || '',
                 filename: song.filename || '',
-                author_name: song.author_name || '',
+                author_name: song.author_name || song.authorName || song.artist || song.singer_name || song.singer || '',
                 album_name: song.album_name || song.album || '',
-                album_id: song.album_id || '',
-                time_length: parseInt(song.time_length) || 0,
-                union_cover: song.union_cover || ''
+                album_id: song.album_id || song.albumId || '',
+                time_length: parseInt(song.time_length || song.timeLength || song.duration) || 0,
+                union_cover: song.union_cover || song.unionCover || song.cover || ''
             };
 
             if (index === 0) {
