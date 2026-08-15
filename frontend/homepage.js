@@ -2850,9 +2850,6 @@ function updateLyricsHighlight(currentTime) {
 
     if (format === 'krc') {
         updateKRCLyricsHighlight(currentTime);
-        if (window.OSDLyrics?.updateTaskbarLyrics && lastActiveLineIndex >= 0) {
-            window.OSDLyrics.updateTaskbarLyrics(currentLyricsLines[lastActiveLineIndex], currentTime);
-        }
     } else {
         updateLRCLyricsHighlight(currentTime);
     }
@@ -2959,12 +2956,9 @@ function updateKRCLyricsHighlight(currentTime) {
     const prevActiveWordIndex = lastActiveWordIndex;
     const hasLineChanged = activeLineIndex !== prevActiveLineIndex;
 
-    // 行变化时更新OSD歌词
-    if (hasLineChanged && activeLineIndex >= 0) {
-        const currentLine = currentLyricsLines[activeLineIndex];
-        if (currentLine && window.sendKRCLineToOSD) {
-            window.sendKRCLineToOSD(currentLine, currentTime);
-        }
+    const currentLine = activeLineIndex >= 0 ? currentLyricsLines[activeLineIndex] : null;
+    if (currentLine && window.sendKRCLineToOSD) {
+        window.sendKRCLineToOSD(currentLine, currentTime);
     }
 
     // 更新行级高亮（仅在行变化时更新，避免每帧remove/add导致闪烁）

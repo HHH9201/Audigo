@@ -16,6 +16,19 @@ import (
 var globalCacheService *CacheService
 var globalTaskbarLyricsWindow application.Window
 
+func emitTaskbarLyricsEvent(name string, data any) {
+	if globalTaskbarLyricsWindow == nil {
+		log.Printf("🎵 任务栏歌词事件未发送，窗口为空: %s", name)
+		return
+	}
+	globalTaskbarLyricsWindow.DispatchWailsEvent(&application.CustomEvent{
+		Name:   name,
+		Sender: "backend",
+		Data:   data,
+	})
+	log.Printf("✅ 已发送任务栏歌词事件: %s", name)
+}
+
 // Wails uses Go's `embed` package to embed the frontend files into the binary.
 // Any files in the frontend/dist folder will be embedded into the binary and
 // made available to the frontend.

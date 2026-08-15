@@ -1057,6 +1057,11 @@ func (c *CacheService) UpdateCurrentLyrics(lyricsText string, songName string, a
 	}
 
 	c.broadcastLyricsMessage(message)
+	emitTaskbarLyricsEvent("taskbar-lyrics:update", map[string]any{
+		"lyricsText": lyricsText,
+		"songName":   songName,
+		"artist":     artist,
+	})
 	return OSDLyricsResponse{Success: true, Message: "OSD歌词更新成功"}
 }
 

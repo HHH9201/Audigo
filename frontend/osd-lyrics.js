@@ -211,6 +211,8 @@ function sendTaskbarLyrics(lyricsLine, currentTime, songName, artist, originalLi
         lyricsText: lyricsLine.text || originalLine,
         playedText,
         remainingText,
+        words,
+        currentTime,
         songName,
         artist
     });
