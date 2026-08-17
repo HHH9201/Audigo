@@ -410,9 +410,6 @@ class HTML5AudioPlayer {
       return true;
     } catch (error) {
       this.logPlaybackMetricsSummary("play-failed");
-      // #region debug-point B:audio-play-failed
-      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'playback-cache-no-start', runId: 'pre-fix', hypothesisId: 'B', location: 'html5-audio-player-unified.js:413', msg: '[DEBUG] audio.play 失败', data: { name: error?.name || '', message: error?.message || '', code: this.audio?.error?.code || null, url: url.slice(0, 160) }, ts: Date.now() }) }).catch(() => {});
-      // #endregion
       console.error(`❌ 播放地址 ${this.currentUrlIndex + 1} 失败:`, error);
       console.error("❌ 播放错误:", error.message);
       console.error("❌ 当前URL:", url);

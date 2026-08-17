@@ -9,12 +9,20 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
 // HomepageService 处理首页相关的服务
 type HomepageService struct {
 	cacheService *CacheService
+	// songUrlInFlight 并发去重：同一 hash+quality 的 GetSongUrl 请求只发一次
+	songUrlInFlight sync.Map // key: "hash|quality" -> *inFlightRequest
+}
+
+type inFlightRequest struct {
+	done   chan struct{}
+	result SongUrlResponse
 }
 
 // NewHomepageService 创建新的首页服务实例
@@ -342,7 +350,38 @@ func normalizeQuality(quality string) string {
 }
 
 func (h *HomepageService) GetSongUrl(hash string, songName, artist, quality string) SongUrlResponse {
+	quality = normalizeQuality(quality)
 	log.Printf("🎵 GetSongUrl请求: Hash=%s, SongName=%s, Artist=%s, Quality=%s", hash, songName, artist, quality)
+	if hash == "" {
+		return SongUrlResponse{
+			Success: false,
+			Message: "歌曲hash不能为空",
+		}
+	}
+
+	// 并发去重：同一 hash+quality 的请求只执行一次，其余等待结果
+	dedupeKey := hash + "|" + quality
+	ifreq := &inFlightRequest{done: make(chan struct{})}
+	if existing, loaded := h.songUrlInFlight.LoadOrStore(dedupeKey, ifreq); loaded {
+		// 已有相同请求在进行中，等待结果
+		log.Printf("🎵 复用进行中的GetSongUrl请求: %s", dedupeKey)
+		waitingReq := existing.(*inFlightRequest)
+		<-waitingReq.done
+		return waitingReq.result
+	}
+
+	// 当前 goroutine 负责执行请求，完成后清理并通知等待者
+	defer func() {
+		h.songUrlInFlight.Delete(dedupeKey)
+		close(ifreq.done)
+	}()
+
+	result := h.getSongUrlInternal(hash, songName, artist, quality)
+	ifreq.result = result
+	return result
+}
+
+func (h *HomepageService) getSongUrlInternal(hash string, songName, artist, quality string) SongUrlResponse {
 	if hash == "" {
 		return SongUrlResponse{
 			Success: false,
@@ -352,7 +391,6 @@ func (h *HomepageService) GetSongUrl(hash string, songName, artist, quality stri
 
 	// 🎵 首先检查是否已缓存
 	if h.cacheService != nil {
-		quality = normalizeQuality(quality)
 		h.cacheService.migrateLegacyCache(hash, songName, artist, quality)
 		if cachedResponse := h.cacheService.GetCachedURL(hash, quality); cachedResponse.Success {
 			log.Printf("✅ 使用缓存的播放地址: %s\n", hash)
