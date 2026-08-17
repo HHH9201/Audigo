@@ -649,8 +649,6 @@ func (f *FavoritesService) GetFavoriteSongsForAI(globalCollectionID string) Albu
 	// 添加查询参数到URL
 	requestURL += "?" + queryParams.Encode()
 
-	log.Printf("调用AI推荐专用歌单歌曲API: %s", requestURL)
-
 	// 创建HTTP客户端，设置超时
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -675,8 +673,6 @@ func (f *FavoritesService) GetFavoriteSongsForAI(globalCollectionID string) Albu
 			Message: fmt.Sprintf("读取响应失败: %v", err),
 		}
 	}
-
-	log.Printf("AI推荐歌单歌曲API响应状态码: %d", resp.StatusCode)
 
 	// 解析JSON响应
 	var apiResponse map[string]interface{}

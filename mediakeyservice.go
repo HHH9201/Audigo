@@ -48,8 +48,6 @@ func (m *MediaKeyService) RegisterMediaKeys() error {
 		return nil
 	}
 
-	log.Println("🎵 开始注册媒体键服务...")
-
 	// 检查平台支持
 	if !m.isPlatformSupported() {
 		log.Println("⚠️ 当前平台不支持系统级媒体键，使用前端键盘监听")
@@ -63,9 +61,6 @@ func (m *MediaKeyService) RegisterMediaKeys() error {
 	}
 
 	m.isRegistered = true
-	log.Println("✅ 系统级媒体键注册成功")
-	m.printSupportedKeys()
-
 	return nil
 }
 
@@ -81,8 +76,6 @@ func (m *MediaKeyService) isPlatformSupported() bool {
 
 // registerSystemMediaKeys 注册系统级媒体键
 func (m *MediaKeyService) registerSystemMediaKeys() error {
-	log.Println("🎵 尝试注册系统级媒体键...")
-
 	// 这里可以根据不同平台实现具体的媒体键注册逻辑
 	switch runtime.GOOS {
 	case "linux":
@@ -122,7 +115,6 @@ func (m *MediaKeyService) registerLinuxMediaKeys() error {
 
 // registerWindowsMediaKeys Windows平台媒体键注册
 func (m *MediaKeyService) registerWindowsMediaKeys() error {
-	log.Println("🪟 Windows平台：使用前端键盘监听（推荐方案）")
 	// Windows下可以使用RegisterHotKey API，但需要CGO
 	// 目前使用前端键盘监听作为主要方案
 	return m.registerFrontendKeys()
@@ -138,29 +130,8 @@ func (m *MediaKeyService) registerMacMediaKeys() error {
 
 // registerFrontendKeys 注册前端键盘监听（主要方案）
 func (m *MediaKeyService) registerFrontendKeys() error {
-	log.Println("🎵 媒体键服务：启用前端键盘监听模式")
-	log.Println("💡 这是推荐的实现方式，具有更好的兼容性和稳定性")
-
 	m.isRegistered = true
-	m.printSupportedKeys()
 	return nil
-}
-
-// printSupportedKeys 打印支持的快捷键
-func (m *MediaKeyService) printSupportedKeys() {
-	log.Println("📋 支持的媒体快捷键:")
-	log.Println("   🎵 播放控制:")
-	log.Println("      - Space: 播放/暂停")
-	log.Println("      - F8: 播放/暂停")
-	log.Println("   ⏭️ 切换歌曲:")
-	log.Println("      - Ctrl+←: 上一首")
-	log.Println("      - Ctrl+→: 下一首")
-	log.Println("      - F7: 上一首")
-	log.Println("      - F9: 下一首")
-	log.Println("   🔊 音量控制:")
-	log.Println("      - Ctrl+↑: 音量+")
-	log.Println("      - Ctrl+↓: 音量-")
-	log.Println("   ℹ️ 注意：需要应用窗口处于焦点状态")
 }
 
 // UnregisterMediaKeys 取消注册媒体键

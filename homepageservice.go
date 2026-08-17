@@ -405,9 +405,16 @@ func (h *HomepageService) claimYouthVip(cookie string) {
 
 	lastYouthVipClaim = now
 
-	requestURL := fmt.Sprintf("%s/youth/vip", baseApi)
+	// 概念版需要附加 KUGOU_API_PLATFORM=lite 到 cookie
+	conceptCookie := cookie
+	if !strings.Contains(cookie, "KUGOU_API_PLATFORM") {
+		conceptCookie = cookie + ";KUGOU_API_PLATFORM=lite"
+	}
+
+	requestURL := fmt.Sprintf("%s/youth/day/vip", baseApi)
 	queryParams := url.Values{}
-	queryParams.Add("cookie", cookie)
+	queryParams.Add("cookie", conceptCookie)
+	queryParams.Add("receive_day", time.Now().Format("2006-01-02"))
 	requestURL += "?" + queryParams.Encode()
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -424,15 +431,13 @@ func (h *HomepageService) claimYouthVip(cookie string) {
 		return
 	}
 
+	log.Printf("🎵 概念版VIP领取响应: %s", truncateString(string(body), 300))
+
 	// 解析响应
 	var vipResp struct {
-		Status  int    `json:"status"`
-		ErrCode int    `json:"error_code"`
-		Data    struct {
-			RemainVipHour int `json:"remain_vip_hour"`
-			Done          int `json:"done"`
-			Remain        int `json:"remain"`
-		} `json:"data"`
+		Status  int             `json:"status"`
+		ErrCode int             `json:"error_code"`
+		Data    json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(body, &vipResp); err != nil {
 		log.Printf("⚠️ 解析概念版VIP响应失败: %v", err)
@@ -440,8 +445,15 @@ func (h *HomepageService) claimYouthVip(cookie string) {
 	}
 
 	if vipResp.Status == 1 && vipResp.ErrCode == 0 {
-		log.Printf("✅ 概念版VIP有效，剩余: %d小时 (今日已领: %d, 剩余次数: %d)",
-			vipResp.Data.RemainVipHour, vipResp.Data.Done, vipResp.Data.Remain)
+		// data 可能是对象或字符串，尝试解析为对象
+		var vipData struct {
+			RemainVipHour int `json:"remain_vip_hour"`
+			Done          int `json:"done"`
+			Remain        int `json:"remain"`
+		}
+		_ = json.Unmarshal(vipResp.Data, &vipData)
+		log.Printf("✅ 概念版VIP领取成功，剩余: %d小时 (今日已领: %d, 剩余次数: %d)",
+			vipData.RemainVipHour, vipData.Done, vipData.Remain)
 	} else {
 		log.Printf("⚠️ 概念版VIP领取失败: status=%d, error_code=%d", vipResp.Status, vipResp.ErrCode)
 	}
@@ -466,19 +478,53 @@ func (h *HomepageService) getSongUrlInternal(hash string, songName, artist, qual
 		qualityChain = []string{"128"}
 	}
 
+	lastResponse := h.trySongUrlQualityChain(hash, songName, artist, qualityChain)
+	if lastResponse.Success || songName == "" {
+		return lastResponse
+	}
+
+	// 某些推荐结果的 Hash 可能已失效，但同名歌曲仍有可播放资源。
+	searchResponse := NewSearchService().Search(songName, 1, 10)
+	if !searchResponse.Success {
+		return lastResponse
+	}
+
+	for _, candidate := range searchResponse.Data.Songs.List {
+		if candidate.Hash == "" || strings.EqualFold(candidate.Hash, hash) {
+			continue
+		}
+		if artist != "" && !strings.Contains(strings.ToLower(candidate.AuthorName), strings.ToLower(artist)) {
+			continue
+		}
+
+		alternative := h.trySongUrlQualityChain(
+			candidate.Hash,
+			candidate.SongName,
+			candidate.AuthorName,
+			qualityChain,
+		)
+		if alternative.Success {
+			log.Printf("✅ 已切换到同名歌曲的可播放资源")
+			return alternative
+		}
+	}
+
+	return lastResponse
+}
+
+func (h *HomepageService) trySongUrlQualityChain(hash, songName, artist string, qualityChain []string) SongUrlResponse {
 	var lastResponse SongUrlResponse
-	for _, q := range qualityChain {
+	for index, q := range qualityChain {
 		qNorm := normalizeQuality(q)
 		resp := h.getSongUrlByQuality(hash, songName, artist, qNorm)
 		if resp.Success {
 			return resp
 		}
 		lastResponse = resp
-		if qNorm != qualityChain[len(qualityChain)-1] {
-			log.Printf("⚠️ 音质 %s 失败，尝试降级\n", qNorm)
+		if index < len(qualityChain)-1 {
+			log.Printf("⚠️ 音质 %s 失败，尝试降级", qNorm)
 		}
 	}
-
 	return lastResponse
 }
 
@@ -526,13 +572,19 @@ func (h *HomepageService) getSongUrlByQuality(hash string, songName, artist, qua
 	// 概念版VIP：领取VIP后再请求播放地址
 	h.claimYouthVip(cookie)
 
+	// 概念版需要附加 KUGOU_API_PLATFORM=lite 到 cookie
+	conceptCookie := cookie
+	if !strings.Contains(cookie, "KUGOU_API_PLATFORM") {
+		conceptCookie = cookie + ";KUGOU_API_PLATFORM=lite"
+	}
+
 	// 构建请求URL
 	requestURL := fmt.Sprintf("%s/song/url", baseApi)
 
 	// 构建查询参数
 	queryParams := url.Values{}
 	queryParams.Add("hash", hash)
-	queryParams.Add("cookie", cookie)
+	queryParams.Add("cookie", conceptCookie)
 	quality = normalizeQuality(quality)
 	queryParams.Add("quality", quality)
 
@@ -1163,7 +1215,6 @@ func (h *HomepageService) GetAIRecommend() AIRecommendResponse {
 			selectedSongs[i] = allValidSongs[indices[i]]
 		}
 
-		log.Printf("从%d首我喜欢的歌曲中随机选择%d首用于AI推荐", len(allValidSongs), maxSongs)
 	}
 
 	// 提取选中歌曲的hash
@@ -1173,13 +1224,6 @@ func (h *HomepageService) GetAIRecommend() AIRecommendResponse {
 	}
 
 	albumAudioIds := strings.Join(songHashes, ",")
-	log.Printf("AI推荐使用的歌曲数量: %d", len(songHashes))
-	log.Printf("AI推荐使用的歌曲hash前10个: %s", func() string {
-		if len(songHashes) > 10 {
-			return strings.Join(songHashes[:10], ",") + "..."
-		}
-		return albumAudioIds
-	}())
 
 	// 构建请求URL
 	requestURL := fmt.Sprintf("%s/ai/recommend", baseApi)
