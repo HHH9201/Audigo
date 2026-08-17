@@ -1,6 +1,6 @@
 // 本地音乐功能模块
 
-import * as LocalMusicService from "./bindings/wmplayer/localmusicservice.js";
+import * as LocalMusicService from "./bindings/MusicHub/localmusicservice.js";
 
 // 全局变量
 let localMusicFiles = [];

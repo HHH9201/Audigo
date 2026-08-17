@@ -342,6 +342,7 @@ func normalizeQuality(quality string) string {
 }
 
 func (h *HomepageService) GetSongUrl(hash string, songName, artist, quality string) SongUrlResponse {
+	log.Printf("🎵 GetSongUrl请求: Hash=%s, SongName=%s, Artist=%s, Quality=%s", hash, songName, artist, quality)
 	if hash == "" {
 		return SongUrlResponse{
 			Success: false,

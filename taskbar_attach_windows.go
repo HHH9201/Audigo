@@ -8,9 +8,13 @@ import (
 	"unsafe"
 )
 
+var taskbarLyricsOffsetX = int32(12)
+var taskbarLyricsOffsetY = int32(0)
+
 const (
-	taskbarLyricsX = int32(12)
-	taskbarLyricsY = int32(0)
+	taskbarLyricsWidth = int32(720)
+	taskbarLyricsX     = int32(12)
+	taskbarLyricsY     = int32(0)
 
 	gwlpStyle     = -16
 	gwlpExStyle   = -20
@@ -40,6 +44,12 @@ var (
 	setWindowLongTaskbar = user32Taskbar.NewProc("SetWindowLongPtrW")
 	setWindowPosTaskbar  = user32Taskbar.NewProc("SetWindowPos")
 )
+
+func setTaskbarLyricsPosition(x, y int) {
+	taskbarLyricsOffsetX = int32(x)
+	taskbarLyricsOffsetY = int32(y)
+	attachTaskbarLyricsWindow()
+}
 
 func attachTaskbarLyricsWindow() {
 	if globalTaskbarLyricsWindow == nil {
@@ -82,7 +92,7 @@ func attachTaskbarLyricsWindow() {
 		return
 	}
 
-	const width = int32(720)
+	width := taskbarLyricsWidth
 	height := client.bottom - client.top
 	if height <= 0 {
 		height = 48
@@ -90,14 +100,28 @@ func attachTaskbarLyricsWindow() {
 	if height > 70 {
 		height = 70
 	}
-	x := taskbarLyricsX
+	maxX := client.right - client.left - width
+	if maxX < 0 {
+		maxX = 0
+	}
+	x := taskbarLyricsOffsetX
 	if x < 0 {
 		x = 0
 	}
+	if x > maxX {
+		x = maxX
+	}
 
-	y := taskbarLyricsY
+	maxY := client.bottom - client.top - height
+	if maxY < 0 {
+		maxY = 0
+	}
+	y := taskbarLyricsOffsetY
 	if y < 0 {
 		y = 0
+	}
+	if y > maxY {
+		y = maxY
 	}
 
 	setWindowPosTaskbar.Call(

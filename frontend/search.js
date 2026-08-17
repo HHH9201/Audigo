@@ -1,7 +1,7 @@
 // 搜索页面JavaScript功能
 
 // 导入Wails绑定
-import * as SearchServiceBinding from './bindings/wmplayer/searchservice.js';
+import * as SearchServiceBinding from './bindings/MusicHub/searchservice.js';
 
 // 搜索服务类
 class SearchService {

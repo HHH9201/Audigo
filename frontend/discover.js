@@ -1,5 +1,5 @@
 // 发现页面功能模块
-import { DiscoverService } from "./bindings/wmplayer/index.js";
+import { DiscoverService } from "./bindings/MusicHub/index.js";
 
 // 缓存配置
 const DISCOVER_CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000; // 24小时（毫秒）

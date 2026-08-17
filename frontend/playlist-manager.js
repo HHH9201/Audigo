@@ -31,7 +31,7 @@ async function initPlaylistManager() {
 async function loadPlaylistFromCache() {
     try {
         // 动态导入 PlaylistService
-        const { GetPlaylist } = await import('./bindings/wmplayer/playlistservice.js');
+        const { GetPlaylist } = await import('./bindings/MusicHub/playlistservice.js');
         const response = await GetPlaylist();
         
         if (response && response.success) {
@@ -109,7 +109,7 @@ async function setPlaylist(songs, currentIndex = 0, name = '播放列表', clear
         console.log('🎵 发送到后端的请求:', request);
 
         // 动态导入 PlaylistService
-        const { SetPlaylist } = await import('./bindings/wmplayer/playlistservice.js');
+        const { SetPlaylist } = await import('./bindings/MusicHub/playlistservice.js');
 
         if (!SetPlaylist) {
             console.error('❌ SetPlaylist服务不可用');
@@ -163,7 +163,7 @@ async function addToPlaylist(song, insert = false) {
         };
         
         // 动态导入 PlaylistService
-        const { AddToPlaylist } = await import('./bindings/wmplayer/playlistservice.js');
+        const { AddToPlaylist } = await import('./bindings/MusicHub/playlistservice.js');
         const response = await AddToPlaylist(request);
         
         if (response && response.success) {
@@ -224,7 +224,7 @@ function getCurrentSong() {
 async function getNextSong() {
     try {
         // 动态导入 PlaylistService
-        const { GetNextSong } = await import('./bindings/wmplayer/playlistservice.js');
+        const { GetNextSong } = await import('./bindings/MusicHub/playlistservice.js');
         const response = await GetNextSong();
         
         if (response && response.success) {
@@ -254,7 +254,7 @@ async function getNextSong() {
 async function getPreviousSong() {
     try {
         // 动态导入 PlaylistService
-        const { GetPreviousSong } = await import('./bindings/wmplayer/playlistservice.js');
+        const { GetPreviousSong } = await import('./bindings/MusicHub/playlistservice.js');
         const response = await GetPreviousSong();
         
         if (response && response.success) {
@@ -278,7 +278,7 @@ async function getPreviousSong() {
 async function setCurrentIndex(index) {
     try {
         // 动态导入 PlaylistService
-        const { SetCurrentIndex } = await import('./bindings/wmplayer/playlistservice.js');
+        const { SetCurrentIndex } = await import('./bindings/MusicHub/playlistservice.js');
         const response = await SetCurrentIndex(index);
         
         if (response && response.success) {
@@ -307,7 +307,7 @@ async function updatePlayMode(shuffleMode, repeatMode) {
         };
 
         // 动态导入 PlaylistService
-        const { UpdatePlayMode } = await import('./bindings/wmplayer/playlistservice.js');
+        const { UpdatePlayMode } = await import('./bindings/MusicHub/playlistservice.js');
         const response = await UpdatePlayMode(request);
 
         if (response && response.success) {
@@ -399,7 +399,7 @@ function peekNextSong() {
 async function clearPlaylist() {
     try {
         // 动态导入 PlaylistService
-        const { ClearPlaylist } = await import('./bindings/wmplayer/playlistservice.js');
+        const { ClearPlaylist } = await import('./bindings/MusicHub/playlistservice.js');
         const response = await ClearPlaylist();
         
         if (response && response.success) {

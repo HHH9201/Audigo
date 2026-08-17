@@ -3,7 +3,7 @@
 #
 # The lines below are called `modelines`. See `:help modeline`
 
-name: "wmplayer"
+name: "MusicHub"
 arch: ${GOARCH}
 platform: "linux"
 version: "0.1.0"
@@ -17,12 +17,12 @@ license: "MIT"
 release: "1"
 
 contents:
-  - src: "./bin/wmplayer"
-    dst: "/usr/local/bin/wmplayer"
+  - src: "./bin/MusicHub"
+    dst: "/usr/local/bin/MusicHub"
   - src: "./build/appicon.png"
-    dst: "/usr/share/icons/hicolor/128x128/apps/wmplayer.png"
-  - src: "./build/linux/wmplayer.desktop"
-    dst: "/usr/share/applications/wmplayer.desktop"
+    dst: "/usr/share/icons/hicolor/128x128/apps/MusicHub.png"
+  - src: "./build/linux/MusicHub.desktop"
+    dst: "/usr/share/applications/MusicHub.desktop"
 
 depends:
   - gtk3

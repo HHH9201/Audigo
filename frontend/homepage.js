@@ -1,6 +1,6 @@
 // 首页功能模块
-import {HomepageService} from "./bindings/wmplayer";
-import {DiscoverService} from "./bindings/wmplayer";
+import {HomepageService} from "./bindings/MusicHub";
+import {DiscoverService} from "./bindings/MusicHub";
 
 // 主页功能状态变量 - 现在由 PlaylistManager 统一管理播放状态
 let currentFmSong = null;
@@ -223,13 +223,41 @@ async function getSongPlayUrlsInternal(hash, songInfo, quality) {
             return normalizedUrls;
         };
 
+        const getCachedLyrics = async () => {
+            try {
+                const response = await fetch(`http://127.0.0.1:18911/api/get-cached-lyrics?songHash=${encodeURIComponent(hash)}`);
+                const data = await response.json();
+                return data.success ? data.lyrics : null;
+            } catch {
+                return null;
+            }
+        };
+
+        const cacheLyrics = async (lyrics) => {
+            if (!lyrics || window.appSettings?.download?.downloadLyrics === false) {
+                return;
+            }
+            const format = /^\s*\[\d+,\d+\]<[^>]+>/.test(lyrics) ? 'krc' : 'lrc';
+            try {
+                await fetch('http://127.0.0.1:18911/api/cache-lyrics', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ songHash: hash, lyrics, format })
+                });
+            } catch {
+                // 歌词缓存失败不影响歌曲播放
+            }
+        };
+
+        const cachedLyrics = await getCachedLyrics();
+
         // 检查是否是本地音乐hash（以"local-"开头）
         if (hash.startsWith('local-')) {
             console.log('🎵 检测到本地音乐hash，获取播放地址和歌词');
             try {
                 // 动态导入 CacheService 和 LocalMusicService
-                const { GetCachedURL } = await import('./bindings/wmplayer/cacheservice.js');
-                const { GetLocalMusicLyrics } = await import('./bindings/wmplayer/localmusicservice.js');
+                const { GetCachedURL } = await import('./bindings/MusicHub/cacheservice.js');
+                const { GetLocalMusicLyrics } = await import('./bindings/MusicHub/localmusicservice.js');
                 
                 // 获取播放地址
                 const cacheResponse = await GetCachedURL(hash, quality);
@@ -238,7 +266,7 @@ async function getSongPlayUrlsInternal(hash, songInfo, quality) {
                     console.log('🎵 本地音乐播放地址获取成功:', cacheResponse.data);
                     
                     // 尝试获取本地音乐的歌词
-                    let lyrics = null;
+                    let lyrics = cachedLyrics;
                     try {
                         // 从缓存服务获取文件路径，然后获取歌词
                         // 这里需要从hash映射中获取文件路径
@@ -290,9 +318,10 @@ async function getSongPlayUrlsInternal(hash, songInfo, quality) {
         console.log('🎵 GetSongUrl API响应:', response);
 
         if (response.success) {
-            let lyrics = null;
-            if (response.data && response.data.lyrics) {
+            let lyrics = cachedLyrics;
+            if (!lyrics && response.data && response.data.lyrics) {
                 lyrics = response.data.lyrics;
+                await cacheLyrics(lyrics);
             }
             // 保存歌词到全局变量
             currentSongLyrics = lyrics;
@@ -3106,7 +3135,7 @@ async function addPlayHistory(song) {
         };
 
         // 动态导入 PlayHistoryService
-        const { AddPlayHistory } = await import('./bindings/wmplayer/playhistoryservice.js');
+        const { AddPlayHistory } = await import('./bindings/MusicHub/playhistoryservice.js');
         // 发送给后端处理，不关心返回结果
         AddPlayHistory(request);
         console.log('✅ 播放历史记录已发送给后端处理');
@@ -3127,7 +3156,7 @@ async function getPlayHistory(page = 1, pageSize = 50, filter = 'all') {
         console.log('获取播放历史:', request);
 
         // 动态导入 PlayHistoryService
-        const { GetPlayHistory } = await import('./bindings/wmplayer/playhistoryservice.js');
+        const { GetPlayHistory } = await import('./bindings/MusicHub/playhistoryservice.js');
         const response = await GetPlayHistory(request);
 
         if (response && response.success) {
@@ -3149,7 +3178,7 @@ async function clearPlayHistory() {
         console.log('清空播放历史');
 
         // 动态导入 PlayHistoryService
-        const { ClearPlayHistory } = await import('./bindings/wmplayer/playhistoryservice.js');
+        const { ClearPlayHistory } = await import('./bindings/MusicHub/playhistoryservice.js');
         const response = await ClearPlayHistory();
 
         if (response && response.success) {
@@ -3199,7 +3228,7 @@ async function addToFavorites(song) {
         }
 
         // 动态导入 FavoritesService
-        const { AddFavorite } = await import('./bindings/wmplayer/favoritesservice.js');
+        const { AddFavorite } = await import('./bindings/MusicHub/favoritesservice.js');
         const response = await AddFavorite(request);
 
         console.log('后端响应:', response);

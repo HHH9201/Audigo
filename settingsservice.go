@@ -55,11 +55,15 @@ type QualitySettings struct {
 
 // InterfaceSettings 界面设置
 type InterfaceSettings struct {
-	Theme        string `json:"theme"`
-	Language     string `json:"language"`
-	ShowLyrics   bool   `json:"showLyrics"`
-	ShowSpectrum bool   `json:"showSpectrum"`
-	MiniPlayer   bool   `json:"miniPlayer"`
+	Theme          string `json:"theme"`
+	Language       string `json:"language"`
+	ShowLyrics     bool   `json:"showLyrics"`
+	ShowSpectrum   bool   `json:"showSpectrum"`
+	MiniPlayer     bool   `json:"miniPlayer"`
+	TaskbarLyrics  bool   `json:"taskbarLyrics"`
+	LyricsFontSize int    `json:"lyricsFontSize"`
+	LyricsOffsetX  int    `json:"lyricsOffsetX"`
+	LyricsOffsetY  int    `json:"lyricsOffsetY"`
 }
 
 // DownloadSettings 下载设置
@@ -128,11 +132,15 @@ func (s *SettingsService) getDefaultSettings() Settings {
 			WifiOnly:         false,
 		},
 		Interface: InterfaceSettings{
-			Theme:        "auto",
-			Language:     "zh-CN",
-			ShowLyrics:   true,
-			ShowSpectrum: false,
-			MiniPlayer:   false,
+			Theme:          "auto",
+			Language:       "zh-CN",
+			ShowLyrics:     true,
+			ShowSpectrum:   false,
+			MiniPlayer:     false,
+			TaskbarLyrics:  true,
+			LyricsFontSize: 22,
+			LyricsOffsetX:  12,
+			LyricsOffsetY:  0,
 		},
 		Download: DownloadSettings{
 			DownloadPath:   "",

@@ -1,5 +1,5 @@
 // login.js - 登录相关功能模块
-import {LoginService} from "./bindings/wmplayer";
+import {LoginService} from "./bindings/MusicHub";
 
 // 用户登录状态管理
 let isLoggedIn = false;

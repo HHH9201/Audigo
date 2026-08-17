@@ -108,8 +108,8 @@ func main() {
 	}
 
 	app := application.New(application.Options{
-		Name:        "wmplayer",
-		Description: "wmplayer - 一个基于 GOLANG 技术的音乐播放器",
+		Name:        "MusicHub",
+		Description: "MusicHub - 一个基于 GOLANG 技术的音乐播放器",
 		Services: []application.Service{
 			application.NewService(&LoginService{}),
 			application.NewService(homepageService),
@@ -132,10 +132,19 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 		Linux: application.LinuxOptions{
-			ProgramName: "wmplayer",
+			ProgramName: "MusicHub",
 		},
 	})
 	globalApplication = app
+	app.Event.On("taskbar-lyrics:position", func(event *application.CustomEvent) {
+		data, ok := event.Data.(map[string]any)
+		if !ok {
+			return
+		}
+		x, _ := data["x"].(float64)
+		y, _ := data["y"].(float64)
+		setTaskbarLyricsPosition(int(x), int(y))
+	})
 
 	// Create a new window with the necessary options.
 	// 'Title' is the title of the window.

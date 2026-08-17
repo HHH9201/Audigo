@@ -931,7 +931,7 @@ function setupPlayerCallbacks() {
   // 播放开始回调
   audioPlayer.onPlay(() => {
     const currentSong = audioPlayer.getCurrentSong();
-    if (window.Events && currentSong) {
+    if (window.Events && currentSong && window.appSettings?.interface?.taskbarLyrics !== false) {
       window.Events.Emit('taskbar-lyrics:show', {
         songName: currentSong.songname || currentSong.title || '',
         artist: currentSong.author_name || currentSong.artist || '',
@@ -1023,7 +1023,7 @@ async function maybePrefetchNextSong(currentTime, duration) {
   try {
     console.log('🎵 开始预缓存下一首歌曲:', nextSong.songname || nextSongHash);
 
-    const { GetCachedURL, CacheAudioFile } = await import('./bindings/wmplayer/cacheservice.js');
+    const { GetCachedURL, CacheAudioFile } = await import('./bindings/MusicHub/cacheservice.js');
     const quality = window.appSettings?.quality?.streamingQuality || 'high';
     const cachedResponse = await GetCachedURL(nextSongHash, quality);
     if (cachedResponse?.success && cachedResponse?.data) {
@@ -1033,7 +1033,7 @@ async function maybePrefetchNextSong(currentTime, duration) {
       return;
     }
 
-    const { GetSongUrl } = await import('./bindings/wmplayer/homepageservice.js');
+    const { GetSongUrl } = await import('./bindings/MusicHub/homepageservice.js');
     const nextSongUrlResponse = await GetSongUrl(nextSongHash, nextSong.songname || '', nextSong.author_name || '', quality);
     if (!nextSongUrlResponse?.success || !nextSongUrlResponse?.data) {
       console.warn('⚠️ 下一首歌曲播放地址获取失败，跳过预缓存:', nextSong.songname || nextSongHash);

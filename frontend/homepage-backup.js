@@ -1,6 +1,6 @@
 // 首页功能模块
-import {HomepageService} from "./bindings/wmplayer";
-import {DiscoverService} from "./bindings/wmplayer";
+import {HomepageService} from "./bindings/MusicHub";
+import {DiscoverService} from "./bindings/MusicHub";
 
 // 主页功能状态变量 - 现在由 PlaylistManager 统一管理播放状态
 let currentFmSong = null;
@@ -201,8 +201,8 @@ async function getSongPlayUrls(hash) {
             console.log('🎵 检测到本地音乐hash，获取播放地址和歌词');
             try {
                 // 动态导入 CacheService 和 LocalMusicService
-                const { GetCachedURL } = await import('./bindings/wmplayer/cacheservice.js');
-                const { GetLocalMusicLyrics } = await import('./bindings/wmplayer/localmusicservice.js');
+                const { GetCachedURL } = await import('./bindings/MusicHub/cacheservice.js');
+                const { GetLocalMusicLyrics } = await import('./bindings/MusicHub/localmusicservice.js');
                 
                 // 获取播放地址
                 const cacheResponse = await GetCachedURL(hash);
@@ -3071,7 +3071,7 @@ async function addPlayHistory(song) {
         };
 
         // 动态导入 PlayHistoryService
-        const { AddPlayHistory } = await import('./bindings/wmplayer/playhistoryservice.js');
+        const { AddPlayHistory } = await import('./bindings/MusicHub/playhistoryservice.js');
         // 发送给后端处理，不关心返回结果
         AddPlayHistory(request);
         console.log('✅ 播放历史记录已发送给后端处理');
@@ -3092,7 +3092,7 @@ async function getPlayHistory(page = 1, pageSize = 50, filter = 'all') {
         console.log('获取播放历史:', request);
 
         // 动态导入 PlayHistoryService
-        const { GetPlayHistory } = await import('./bindings/wmplayer/playhistoryservice.js');
+        const { GetPlayHistory } = await import('./bindings/MusicHub/playhistoryservice.js');
         const response = await GetPlayHistory(request);
 
         if (response && response.success) {
@@ -3114,7 +3114,7 @@ async function clearPlayHistory() {
         console.log('清空播放历史');
 
         // 动态导入 PlayHistoryService
-        const { ClearPlayHistory } = await import('./bindings/wmplayer/playhistoryservice.js');
+        const { ClearPlayHistory } = await import('./bindings/MusicHub/playhistoryservice.js');
         const response = await ClearPlayHistory();
 
         if (response && response.success) {
@@ -3164,7 +3164,7 @@ async function addToFavorites(song) {
         }
 
         // 动态导入 FavoritesService
-        const { AddFavorite } = await import('./bindings/wmplayer/favoritesservice.js');
+        const { AddFavorite } = await import('./bindings/MusicHub/favoritesservice.js');
         const response = await AddFavorite(request);
 
         console.log('后端响应:', response);

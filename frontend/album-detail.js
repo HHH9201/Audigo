@@ -1,5 +1,5 @@
 // 专辑详情页面功能模块
-import { AlbumService } from "./bindings/wmplayer/index.js";
+import { AlbumService } from "./bindings/MusicHub/index.js";
 
 // 缓存配置
 const FAVORITES_CACHE_EXPIRY = 10 * 60 * 60 * 1000; // 10小时缓存

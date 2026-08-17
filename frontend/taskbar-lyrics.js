@@ -3,6 +3,11 @@ import { Events, Window } from "@wailsio/runtime";
 const lyricsText = document.getElementById("lyricsText");
 const placeholder = "♪ ♫ ♪ ♫";
 let animationFrame = 0;
+
+function applyFontSize(fontSize) {
+    const size = Math.max(12, Math.min(48, Number(fontSize) || 22));
+    lyricsText?.style.setProperty('--lyrics-font-size', `${size}px`);
+}
 let lyricWords = [];
 let lyricWordText = [];
 let lyricStartTimes = [];
@@ -124,6 +129,11 @@ function updateLyrics(data) {
 
 Events.On("taskbar-lyrics:update", (event) => {
     updateLyrics(getData(event));
+});
+
+Events.On("taskbar-lyrics:settings", (event) => {
+    const data = getData(event);
+    applyFontSize(data.fontSize);
 });
 
 animationFrame = requestAnimationFrame(animateLyrics);

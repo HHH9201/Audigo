@@ -41,7 +41,7 @@ class MPRISIntegration {
     async checkMPRISStatus() {
         try {
             // 动态导入MediaKeyService绑定
-            const { GetMediaKeyStatus } = await import('./bindings/wmplayer/mediakeyservice.js');
+            const { GetMediaKeyStatus } = await import('./bindings/MusicHub/mediakeyservice.js');
             
             const status = await GetMediaKeyStatus();
             console.log('🎵 媒体键服务状态:', status);
@@ -204,7 +204,7 @@ class MPRISIntegration {
             console.log('🎵 MPRIS: 更新播放状态为', status);
 
             // 动态导入MediaKeyService绑定
-            const { UpdateMPRISPlaybackStatus } = await import('./bindings/wmplayer/mediakeyservice.js');
+            const { UpdateMPRISPlaybackStatus } = await import('./bindings/MusicHub/mediakeyservice.js');
 
             if (UpdateMPRISPlaybackStatus) {
                 await UpdateMPRISPlaybackStatus(status);
@@ -222,7 +222,7 @@ class MPRISIntegration {
             console.log('🎵 MPRIS: 更新元数据', { title, artist, album, duration });
 
             // 动态导入MediaKeyService绑定
-            const { UpdateMPRISMetadata } = await import('./bindings/wmplayer/mediakeyservice.js');
+            const { UpdateMPRISMetadata } = await import('./bindings/MusicHub/mediakeyservice.js');
 
             if (UpdateMPRISMetadata) {
                 await UpdateMPRISMetadata(title, artist, album, artUrl, duration);
@@ -240,7 +240,7 @@ class MPRISIntegration {
             console.log('🎵 MPRIS: 更新音量', volume);
 
             // 动态导入MediaKeyService绑定
-            const { UpdateMPRISVolume } = await import('./bindings/wmplayer/mediakeyservice.js');
+            const { UpdateMPRISVolume } = await import('./bindings/MusicHub/mediakeyservice.js');
 
             if (UpdateMPRISVolume) {
                 await UpdateMPRISVolume(volume);
@@ -259,7 +259,7 @@ class MPRISIntegration {
             // console.log('🎵 MPRIS: 更新播放位置', position);
 
             // 动态导入MediaKeyService绑定
-            const { UpdateMPRISPosition } = await import('./bindings/wmplayer/mediakeyservice.js');
+            const { UpdateMPRISPosition } = await import('./bindings/MusicHub/mediakeyservice.js');
 
             if (UpdateMPRISPosition) {
                 await UpdateMPRISPosition(position);

@@ -1,7 +1,7 @@
 // settings.js - 设置页面功能模块
 
 // 导入设置服务
-import * as SettingsService from './bindings/wmplayer/settingsservice.js';
+import * as SettingsService from './bindings/MusicHub/settingsservice.js';
 
 // 设置数据存储
 let settingsData = {
@@ -26,7 +26,11 @@ let settingsData = {
         language: 'zh-CN',
         showLyrics: true,
         showSpectrum: false,
-        miniPlayer: false
+        miniPlayer: false,
+        taskbarLyrics: true,
+        lyricsFontSize: 22,
+        lyricsOffsetX: 12,
+        lyricsOffsetY: 0
     },
     // 下载设置
     download: {
@@ -312,6 +316,59 @@ function renderSettingsPage() {
                     </label>
                 </div>
             </div>
+
+            <div class="settings-item">
+                <div class="settings-item-info">
+                    <div class="settings-item-title">任务栏歌词</div>
+                    <div class="settings-item-description">播放时在任务栏或桌面歌词窗口显示当前歌词</div>
+                </div>
+                <div class="settings-item-control">
+                    <label class="settings-switch">
+                        <input type="checkbox" ${settingsData.interface.taskbarLyrics !== false ? 'checked' : ''}
+                               onchange="updateSetting('interface.taskbarLyrics', this.checked)">
+                        <span class="settings-switch-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-item">
+                <div class="settings-item-info">
+                    <div class="settings-item-title">任务栏歌词左右位置</div>
+                    <div class="settings-item-description">仅在任务栏内部横向移动，超出范围会自动限制</div>
+                </div>
+                <div class="settings-item-control">
+                    <input type="range" class="settings-slider" min="0" max="1000"
+                           value="${settingsData.interface.lyricsOffsetX ?? 12}"
+                           oninput="updateSetting('interface.lyricsOffsetX', parseInt(this.value))">
+                    <span class="settings-value">${settingsData.interface.lyricsOffsetX ?? 12}px</span>
+                </div>
+            </div>
+
+            <div class="settings-item">
+                <div class="settings-item-info">
+                    <div class="settings-item-title">任务栏歌词上下位置</div>
+                    <div class="settings-item-description">仅在任务栏内部纵向移动，超出范围会自动限制</div>
+                </div>
+                <div class="settings-item-control">
+                    <input type="range" class="settings-slider" min="0" max="70"
+                           value="${settingsData.interface.lyricsOffsetY ?? 0}"
+                           oninput="updateSetting('interface.lyricsOffsetY', parseInt(this.value))">
+                    <span class="settings-value">${settingsData.interface.lyricsOffsetY ?? 0}px</span>
+                </div>
+            </div>
+
+            <div class="settings-item">
+                <div class="settings-item-info">
+                    <div class="settings-item-title">歌词文字大小</div>
+                    <div class="settings-item-description">动态调整任务栏歌词字号</div>
+                </div>
+                <div class="settings-item-control">
+                    <input type="range" class="settings-slider" min="12" max="48"
+                           value="${settingsData.interface.lyricsFontSize || 22}"
+                           oninput="updateSetting('interface.lyricsFontSize', parseInt(this.value))">
+                    <span class="settings-value">${settingsData.interface.lyricsFontSize || 22}px</span>
+                </div>
+            </div>
         </div>
 
         <!-- 下载设置 -->
@@ -514,6 +571,29 @@ function applySetting(path, value) {
                 volumeDisplay.textContent = value + '%';
             }
             break;
+        case 'interface.taskbarLyrics':
+            if (window.Events) {
+                window.Events.Emit(value ? 'taskbar-lyrics:show' : 'taskbar-lyrics:hide');
+            }
+            break;
+        case 'interface.lyricsOffsetX':
+        case 'interface.lyricsOffsetY':
+            if (window.Events) {
+                window.Events.Emit('taskbar-lyrics:position', {
+                    x: settingsData.interface.lyricsOffsetX ?? 12,
+                    y: settingsData.interface.lyricsOffsetY ?? 0
+                });
+            }
+            break;
+        case 'interface.lyricsFontSize':
+            if (window.Events) {
+                window.Events.Emit('taskbar-lyrics:settings', { fontSize: value });
+            }
+            const lyricsSizeDisplay = document.querySelector('.settings-item input[type="range"][min="12"] + .settings-value');
+            if (lyricsSizeDisplay) {
+                lyricsSizeDisplay.textContent = `${value}px`;
+            }
+            break;
         case 'behavior.closeAction':
             // 更新全局关闭行为设置
             if (window.closeAction !== undefined) {
@@ -609,7 +689,11 @@ window.resetSettings = async () => {
                     language: 'zh-CN',
                     showLyrics: true,
                     showSpectrum: false,
-                    miniPlayer: false
+                    miniPlayer: false,
+                    taskbarLyrics: true,
+                    lyricsFontSize: 22,
+                    lyricsOffsetX: 12,
+                    lyricsOffsetY: 0
                 },
                 download: {
                     downloadPath: '',

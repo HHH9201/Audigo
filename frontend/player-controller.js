@@ -3,6 +3,7 @@
 
 // 播放器状态 - 现在由 HTML5 Audio API 管理
 let playlistPlayRequest = null;
+let playlistPlayRequestId = 0;
 
 // 备用的 updatePlayerBar 函数，防止HTML5音频集成脚本未加载
 function fallbackUpdatePlayerBar() {
@@ -22,7 +23,9 @@ function fallbackUpdatePlayerBar() {
 
 // 统一播放函数 - 单曲播放
 async function playSong(song) {
-    console.log('🎵 播放单曲:', song.songname);
+    console.log('🎵 播放单曲:', song?.songname);
+
+    const requestId = ++playlistPlayRequestId;
 
     if (!song || !song.hash) {
         console.error('❌ 歌曲信息无效');
@@ -43,7 +46,7 @@ async function playSong(song) {
         }
 
         // 播放当前歌曲
-        return await playCurrentSong();
+        return await playCurrentSong(song, requestId);
     } catch (error) {
         console.error('❌ 播放单曲失败:', error);
         return false;
@@ -59,9 +62,10 @@ async function playPlaylist(songs, startIndex = 0, playlistName = '播放列表'
         return playlistPlayRequest.promise;
     }
 
-    console.log('🎵 播放歌单:', { songs: songs.length, startIndex, playlistName, playMode });
+    const requestId = ++playlistPlayRequestId;
+    console.log('🎵 播放歌单:', { songs: songs?.length || 0, startIndex, playlistName, playMode });
 
-    if (!songs || songs.length === 0) {
+    if (!songs || songs.length === 0 || !requestSong?.hash) {
         console.error('❌ 歌曲列表为空');
         return false;
     }
@@ -81,8 +85,8 @@ async function playPlaylist(songs, startIndex = 0, playlistName = '播放列表'
                 return false;
             }
 
-            console.log('🎵 播放列表设置成功，开始播放当前歌曲...');
-            return await playCurrentSong();
+            console.log('🎵 播放列表设置成功，开始播放当前歌曲:', requestSong?.hash);
+            return await playCurrentSong(requestSong, requestId);
         } catch (error) {
             console.error('❌ 播放歌单失败:', error);
             return false;
@@ -99,15 +103,20 @@ async function playPlaylist(songs, startIndex = 0, playlistName = '播放列表'
 }
 
 // 播放当前歌曲
-async function playCurrentSong() {
+async function playCurrentSong(requestedSong = null, requestId = playlistPlayRequestId) {
     console.log('🎵 获取当前歌曲...');
-    const song = window.PlaylistManager.getCurrentSong();
+    const song = requestedSong || window.PlaylistManager.getCurrentSong();
     if (!song) {
         console.error('❌ 没有当前歌曲可播放');
         return false;
     }
 
-    console.log('🎵 播放当前歌曲:', song.songname);
+    if (requestId !== playlistPlayRequestId) {
+        console.log('🎵 忽略已过期的播放请求:', song.hash);
+        return false;
+    }
+
+    console.log('🎵 播放当前歌曲:', song.songname, song.hash);
     console.log('🎵 歌曲详细信息:', song);
 
     try {
@@ -140,6 +149,10 @@ async function playCurrentSong() {
         console.log('🎵 获取播放地址，歌曲hash:', song.hash);
         const playUrlsPromise = window.getSongPlayUrls(song.hash, song);
         const playUrls = await playUrlsPromise;
+        if (requestId !== playlistPlayRequestId) {
+            console.log('🎵 播放地址返回时请求已过期:', song.hash);
+            return false;
+        }
         console.log('🎵 获取到播放地址:', Array.isArray(playUrls) ? `${playUrls.length}个` : '无效');
 
         // 清除加载状态（如果存在）
@@ -191,9 +204,6 @@ async function playCurrentSong() {
             if (player && player.play) {
                 try {
                     // 直接调用HTML5播放器的play方法，避免循环调用
-                    // #region debug-point A:player-call
-                    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'playback-cache-no-start', runId: 'pre-fix', hypothesisId: 'A', location: 'player-controller.js:177', msg: '[DEBUG] 调用播放器', data: { hasPlayer: true, hasPlay: true, urlCount: Array.isArray(playUrls) ? playUrls.length : null, songHash: legacySong.hash }, ts: Date.now() }) }).catch(() => {});
-                    // #endregion
                     success = await player.play(legacySong, playUrls);
                     if (success) {
                         console.log('✅ HTML5 音频播放器播放成功');

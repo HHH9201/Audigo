@@ -41,7 +41,7 @@ async function getPlayHistory(page = 1, pageSize = 50, filter = 'all') {
         console.log('获取播放历史:', request);
 
         // 动态导入 PlayHistoryService
-        const { GetPlayHistory } = await import('./bindings/wmplayer/playhistoryservice.js');
+        const { GetPlayHistory } = await import('./bindings/MusicHub/playhistoryservice.js');
         const response = await GetPlayHistory(request);
 
         if (response && response.success) {
@@ -63,7 +63,7 @@ async function clearPlayHistory() {
         console.log('清空播放历史');
 
         // 动态导入 PlayHistoryService
-        const { ClearPlayHistory } = await import('./bindings/wmplayer/playhistoryservice.js');
+        const { ClearPlayHistory } = await import('./bindings/MusicHub/playhistoryservice.js');
         const response = await ClearPlayHistory();
 
         if (response && response.success) {

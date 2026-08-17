@@ -25,6 +25,7 @@ type CacheService struct {
 	server             *http.Server
 	cacheDir           string
 	mp3Dir             string
+	lyricsDir          string
 	serverPort         string
 	localMusicMap      map[string]string // 本地音乐hash到文件路径的映射
 	localMusicMapMutex sync.RWMutex
@@ -68,11 +69,13 @@ func NewCacheService() *CacheService {
 	homeDir, _ := os.UserHomeDir()
 	cacheDir := filepath.Join(homeDir, ".cache", "gomusic")
 	mp3Dir := filepath.Join(cacheDir, "cache", "mp3")
+	lyricsDir := filepath.Join(cacheDir, "cache", "lyrics")
 	localMapFile := filepath.Join(cacheDir, "cache", "local_music_map.json")
 
 	service := &CacheService{
 		cacheDir:         cacheDir,
 		mp3Dir:           mp3Dir,
+		lyricsDir:        lyricsDir,
 		serverPort:       "18911", // 本地HTTP服务端口
 		localMusicMap:    make(map[string]string),
 		localMapFile:     localMapFile,
@@ -148,6 +151,8 @@ func (c *CacheService) StartHTTPServerWithOSDLyrics() error {
 	mux := http.NewServeMux()
 	mux.Handle("/", wrappedHandler)
 	mux.HandleFunc("/api/audio-proxy", c.handleAudioProxy)
+	mux.HandleFunc("/api/cache-lyrics", c.handleCacheLyrics)
+	mux.HandleFunc("/api/get-cached-lyrics", c.handleGetCachedLyrics)
 
 	// 如果提供了OSD歌词服务，添加SSE端点
 	mux.HandleFunc("/api/osd-lyrics/sse", func(w http.ResponseWriter, r *http.Request) {
@@ -207,6 +212,9 @@ func (c *CacheService) ensureCacheDir() error {
 
 	// 创建MP3缓存目录
 	if err := os.MkdirAll(c.mp3Dir, 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(c.lyricsDir, 0755); err != nil {
 		return err
 	}
 
@@ -328,6 +336,55 @@ func (c *CacheService) GetProxyURL(songHash, remoteURL string) string {
 		params.Set("hash", songHash)
 	}
 	return fmt.Sprintf("http://127.0.0.1:%s/api/audio-proxy?%s", c.serverPort, params.Encode())
+}
+
+func (c *CacheService) handleCacheLyrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var request struct {
+		SongHash string `json:"songHash"`
+		Lyrics   string `json:"lyrics"`
+		Format   string `json:"format"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.SongHash == "" || request.Lyrics == "" {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if err := c.ensureCacheDir(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	format := strings.ToLower(request.Format)
+	if format != "krc" {
+		format = "lrc"
+	}
+	path := filepath.Join(c.lyricsDir, c.generateFileHash(request.SongHash)+"."+format)
+	if err := os.WriteFile(path, []byte(request.Lyrics), 0600); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"success": true, "path": path})
+}
+
+func (c *CacheService) handleGetCachedLyrics(w http.ResponseWriter, r *http.Request) {
+	hash := r.URL.Query().Get("songHash")
+	if hash == "" {
+		http.Error(w, "missing songHash", http.StatusBadRequest)
+		return
+	}
+	for _, format := range []string{"krc", "lrc"} {
+		path := filepath.Join(c.lyricsDir, c.generateFileHash(hash)+"."+format)
+		if data, err := os.ReadFile(path); err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "lyrics": string(data), "format": format})
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"success": false})
 }
 
 // downloadAndCache 下载并缓存音频文件

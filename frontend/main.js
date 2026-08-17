@@ -2,7 +2,7 @@
 import {Window, Events} from "@wailsio/runtime";
 import {initLoginModule, getLoginStatus} from "./login.js";
 import {initHomePage} from "./homepage.js";
-import * as SettingsService from "./bindings/wmplayer/settingsservice.js";
+import * as SettingsService from "./bindings/MusicHub/settingsservice.js";
 
 import {initLocalMusic} from "./local.js";
 import "./playlists.js";
@@ -161,6 +161,16 @@ function applySettingsToFrontend(settings) {
     if (settings.interface && settings.interface.theme && settings.interface.theme !== 'auto') {
         document.documentElement.setAttribute('data-theme', settings.interface.theme);
         console.log('🎨 主题设置已应用:', settings.interface.theme);
+    }
+
+    if (settings.interface) {
+        window.Events?.Emit('taskbar-lyrics:settings', {
+            fontSize: settings.interface.lyricsFontSize ?? 22
+        });
+        window.Events?.Emit('taskbar-lyrics:position', {
+            x: settings.interface.lyricsOffsetX ?? 12,
+            y: settings.interface.lyricsOffsetY ?? 0
+        });
     }
 
     // 应用音量设置

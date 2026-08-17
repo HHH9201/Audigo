@@ -25,7 +25,7 @@ body {
 
 #lyricsText {
     overflow: hidden;
-    font-size: 22px;
+    font-size: var(--lyrics-font-size, 22px);
     font-weight: 700;
     line-height: 30px;
     text-overflow: ellipsis;

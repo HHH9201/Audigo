@@ -1,4 +1,4 @@
-module wmplayer
+module MusicHub
 
 go 1.25
 

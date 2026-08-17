@@ -51,7 +51,7 @@ async function initOSDLyrics() {
 
     try {
         // 导入所有必要的绑定服务方法
-        const { UpdateCurrentLyrics, SetEnabled, IsEnabled } = await import('./bindings/wmplayer/cacheservice.js');
+        const { UpdateCurrentLyrics, SetEnabled, IsEnabled } = await import('./bindings/MusicHub/cacheservice.js');
         osdLyricsService = { UpdateCurrentLyrics, SetEnabled, IsEnabled };
         osdLyricsInitialized = true;
         console.log('✅ OSD歌词服务初始化完成');

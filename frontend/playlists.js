@@ -1,5 +1,5 @@
 // 收藏的歌单页面功能模块
-import { FavoritesService } from "./bindings/wmplayer/index.js";
+import { FavoritesService } from "./bindings/MusicHub/index.js";
 
 // 缓存配置
 const PLAYLISTS_CACHE_EXPIRY = 10 * 60 * 60 * 1000; // 10小时缓存
@@ -315,7 +315,7 @@ class PlaylistsPageManager {
             console.log('🎵 使用global_collection_id获取歌单歌曲:', globalCollectionId);
 
             // 获取歌单歌曲列表
-            const { GetPlaylistSongs } = await import('./bindings/wmplayer/favoritesservice.js');
+            const { GetPlaylistSongs } = await import('./bindings/MusicHub/favoritesservice.js');
             const response = await GetPlaylistSongs(globalCollectionId);
 
             if (response && response.success && response.data && response.data.length > 0) {

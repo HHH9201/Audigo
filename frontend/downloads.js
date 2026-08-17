@@ -48,7 +48,7 @@ class DownloadManager {
             console.log('📥 加载下载记录，页码:', this.currentPage);
 
             // 动态导入下载服务
-            const { GetDownloadRecords } = await import('./bindings/wmplayer/downloadservice.js');
+            const { GetDownloadRecords } = await import('./bindings/MusicHub/downloadservice.js');
             
             const request = {
                 page: this.currentPage,
@@ -202,7 +202,7 @@ class DownloadManager {
             console.log('📁 打开文件夹:', filePath);
 
             // 动态导入下载服务
-            const { OpenFileFolder } = await import('./bindings/wmplayer/downloadservice.js');
+            const { OpenFileFolder } = await import('./bindings/MusicHub/downloadservice.js');
 
             const response = await OpenFileFolder(filePath);
 
@@ -229,7 +229,7 @@ class DownloadManager {
             console.log('🗑️ 删除下载记录:', hash);
 
             // 动态导入下载服务
-            const { DeleteDownloadRecord } = await import('./bindings/wmplayer/downloadservice.js');
+            const { DeleteDownloadRecord } = await import('./bindings/MusicHub/downloadservice.js');
             
             const request = { hash: hash };
             const response = await DeleteDownloadRecord(request);
@@ -256,7 +256,7 @@ class DownloadManager {
             console.log('🗑️ 清空所有下载记录');
 
             // 动态导入下载服务
-            const { ClearDownloadRecords } = await import('./bindings/wmplayer/downloadservice.js');
+            const { ClearDownloadRecords } = await import('./bindings/MusicHub/downloadservice.js');
             
             const response = await ClearDownloadRecords();
 
@@ -310,7 +310,7 @@ class DownloadManager {
             console.log('➕ 添加下载记录:', songData.songname);
 
             // 动态导入下载服务
-            const { AddDownloadRecord } = await import('./bindings/wmplayer/downloadservice.js');
+            const { AddDownloadRecord } = await import('./bindings/MusicHub/downloadservice.js');
             
             const request = {
                 hash: songData.hash,

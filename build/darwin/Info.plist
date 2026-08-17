@@ -4,11 +4,11 @@
         <key>CFBundlePackageType</key>
         <string>APPL</string>
         <key>CFBundleName</key>
-        <string>My Product</string>
+        <string>MusicHub</string>
         <key>CFBundleExecutable</key>
-        <string>wmplayer</string>
+        <string>MusicHub</string>
         <key>CFBundleIdentifier</key>
-        <string>com.wails.wmplayer</string>
+        <string>com.wails.MusicHub</string>
         <key>CFBundleVersion</key>
         <string>0.1.0</string>
         <key>CFBundleGetInfoString</key>
