@@ -349,9 +349,16 @@ func normalizeQuality(quality string) string {
 	}
 }
 
+func truncateString(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
+}
+
 func (h *HomepageService) GetSongUrl(hash string, songName, artist, quality string) SongUrlResponse {
 	quality = normalizeQuality(quality)
-	log.Printf("🎵 GetSongUrl请求: Hash=%s, SongName=%s, Artist=%s, Quality=%s", hash, songName, artist, quality)
 	if hash == "" {
 		return SongUrlResponse{
 			Success: false,
@@ -381,6 +388,65 @@ func (h *HomepageService) GetSongUrl(hash string, songName, artist, quality stri
 	return result
 }
 
+// claimYouthVip 领取酷狗概念版VIP（看广告领VIP）
+// 概念版每天可领8次，每次3小时，确保播放VIP歌曲前有有效VIP
+var lastYouthVipClaim int64 // 上次领取时间戳（秒）
+
+func (h *HomepageService) claimYouthVip(cookie string) {
+	if cookie == "" {
+		return
+	}
+
+	// 2小时内不重复领取（每次领取3小时VIP）
+	now := time.Now().Unix()
+	if now-lastYouthVipClaim < 7200 {
+		return
+	}
+
+	lastYouthVipClaim = now
+
+	requestURL := fmt.Sprintf("%s/youth/vip", baseApi)
+	queryParams := url.Values{}
+	queryParams.Add("cookie", cookie)
+	requestURL += "?" + queryParams.Encode()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(requestURL)
+	if err != nil {
+		log.Printf("⚠️ 领取概念版VIP失败: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("⚠️ 读取概念版VIP响应失败: %v", err)
+		return
+	}
+
+	// 解析响应
+	var vipResp struct {
+		Status  int    `json:"status"`
+		ErrCode int    `json:"error_code"`
+		Data    struct {
+			RemainVipHour int `json:"remain_vip_hour"`
+			Done          int `json:"done"`
+			Remain        int `json:"remain"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &vipResp); err != nil {
+		log.Printf("⚠️ 解析概念版VIP响应失败: %v", err)
+		return
+	}
+
+	if vipResp.Status == 1 && vipResp.ErrCode == 0 {
+		log.Printf("✅ 概念版VIP有效，剩余: %d小时 (今日已领: %d, 剩余次数: %d)",
+			vipResp.Data.RemainVipHour, vipResp.Data.Done, vipResp.Data.Remain)
+	} else {
+		log.Printf("⚠️ 概念版VIP领取失败: status=%d, error_code=%d", vipResp.Status, vipResp.ErrCode)
+	}
+}
+
 func (h *HomepageService) getSongUrlInternal(hash string, songName, artist, quality string) SongUrlResponse {
 	if hash == "" {
 		return SongUrlResponse{
@@ -389,6 +455,34 @@ func (h *HomepageService) getSongUrlInternal(hash string, songName, artist, qual
 		}
 	}
 
+	// 音质降级链：flac -> 320 -> 128
+	qualityChain := []string{quality}
+	switch quality {
+	case "flac":
+		qualityChain = []string{"flac", "320", "128"}
+	case "320":
+		qualityChain = []string{"320", "128"}
+	case "128":
+		qualityChain = []string{"128"}
+	}
+
+	var lastResponse SongUrlResponse
+	for _, q := range qualityChain {
+		qNorm := normalizeQuality(q)
+		resp := h.getSongUrlByQuality(hash, songName, artist, qNorm)
+		if resp.Success {
+			return resp
+		}
+		lastResponse = resp
+		if qNorm != qualityChain[len(qualityChain)-1] {
+			log.Printf("⚠️ 音质 %s 失败，尝试降级\n", qNorm)
+		}
+	}
+
+	return lastResponse
+}
+
+func (h *HomepageService) getSongUrlByQuality(hash string, songName, artist, quality string) SongUrlResponse {
 	// 🎵 首先检查是否已缓存
 	if h.cacheService != nil {
 		h.cacheService.migrateLegacyCache(hash, songName, artist, quality)
@@ -418,7 +512,7 @@ func (h *HomepageService) getSongUrlInternal(hash string, songName, artist, qual
 	}
 
 	// 🎵 如果没有缓存，从API获取播放地址
-	log.Printf("🎵 从API获取播放地址: %s\n", hash)
+	log.Printf("🎵 从API获取播放地址: %s (音质: %s)\n", hash, quality)
 
 	// 读取cookie
 	cookie, err := h.readCookieFromFile()
@@ -428,6 +522,9 @@ func (h *HomepageService) getSongUrlInternal(hash string, songName, artist, qual
 			Message: fmt.Sprintf("读取cookie失败: %v", err),
 		}
 	}
+
+	// 概念版VIP：领取VIP后再请求播放地址
+	h.claimYouthVip(cookie)
 
 	// 构建请求URL
 	requestURL := fmt.Sprintf("%s/song/url", baseApi)
@@ -485,6 +582,13 @@ func (h *HomepageService) getSongUrlInternal(hash string, songName, artist, qual
 
 	// 简化日志记录
 	log.Printf("🎵 GetSongUrl API调用成功\n")
+	log.Printf("🎵 API返回的JSON键: %v\n", func() []string {
+		keys := make([]string, 0, len(apiResponse))
+		for k := range apiResponse {
+			keys = append(keys, k)
+		}
+		return keys
+	}())
 
 	// 收集所有播放地址用于缓存和返回
 	var remoteUrls []string
@@ -517,6 +621,37 @@ func (h *HomepageService) getSongUrlInternal(hash string, songName, artist, qual
 				appendUniqueURL(backupUrlStr)
 			}
 		}
+	}
+
+	// 兼容：某些接口返回 data.url / data.backupUrl 结构
+	if dataMap, ok := apiResponse["data"].(map[string]any); ok {
+		if urlArray, ok := dataMap["url"].([]any); ok {
+			for _, urlItem := range urlArray {
+				if urlStr, ok := urlItem.(string); ok {
+					appendUniqueURL(urlStr)
+				}
+			}
+		}
+		if backupUrlArray, ok := dataMap["backupUrl"].([]any); ok {
+			for _, backupUrlItem := range backupUrlArray {
+				if backupUrlStr, ok := backupUrlItem.(string); ok {
+					appendUniqueURL(backupUrlStr)
+				}
+			}
+		}
+		// 兼容：data 中直接是字符串 url
+		if urlStr, ok := dataMap["url"].(string); ok {
+			appendUniqueURL(urlStr)
+		}
+	}
+
+	// 兼容：顶层直接是字符串 url
+	if urlStr, ok := apiResponse["url"].(string); ok {
+		appendUniqueURL(urlStr)
+	}
+
+	if len(remoteUrls) == 0 {
+		log.Printf("⚠️ 未从API响应中解析到播放地址，返回内容前500字符: %s\n", truncateString(string(body), 500))
 	}
 
 	// 获取歌词内容
@@ -1057,8 +1192,6 @@ func (h *HomepageService) GetAIRecommend() AIRecommendResponse {
 	// 添加查询参数到URL
 	requestURL += "?" + queryParams.Encode()
 
-	log.Printf("调用AI推荐API: %s", requestURL)
-
 	// 创建HTTP客户端，设置超时
 	client := &http.Client{
 		Timeout: 15 * time.Second,
@@ -1082,8 +1215,6 @@ func (h *HomepageService) GetAIRecommend() AIRecommendResponse {
 			Message: fmt.Sprintf("读取响应失败: %v", err),
 		}
 	}
-
-	log.Printf("AI推荐API响应状态码: %d", resp.StatusCode)
 
 	// 检查HTTP状态码
 	if resp.StatusCode != http.StatusOK {

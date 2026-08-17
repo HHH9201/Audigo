@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -236,20 +235,6 @@ func (p *PlaylistService) SetPlaylist(request SetPlaylistRequest) PlayerPlaylist
 
 	if request.PlayMode == "" {
 		request.PlayMode = "normal"
-	}
-
-	// 调试：打印第一首歌曲的数据
-	if len(request.Songs) > 0 {
-		firstSong := request.Songs[0]
-		log.Printf("🎵 后端接收到的第一首歌曲数据: Hash=%s, SongName=%s, Filename=%s, ArtistName=%s",
-			firstSong.Hash, firstSong.SongName, firstSong.Filename, firstSong.ArtistName)
-		selectedIndex := request.CurrentIndex
-		if selectedIndex < 0 {
-			selectedIndex = 0
-		}
-		selectedSong := request.Songs[selectedIndex]
-		log.Printf("🎵 后端当前选中歌曲: Index=%d, Hash=%s, SongName=%s, Filename=%s, ArtistName=%s",
-			selectedIndex, selectedSong.Hash, selectedSong.SongName, selectedSong.Filename, selectedSong.ArtistName)
 	}
 
 	// 更新播放列表数据

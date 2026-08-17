@@ -114,12 +114,9 @@ func (c *CacheService) StartHTTPServerWithOSDLyrics() error {
 
 	// 包装文件服务器，添加日志和错误处理
 	wrappedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("🎵 HTTP请求: %s %s\n", r.Method, r.URL.Path)
-
 		// 检查文件是否存在
 		filePath := filepath.Join(c.cacheDir, r.URL.Path)
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			log.Printf("❌ 文件不存在: %s\n", filePath)
 			http.NotFound(w, r)
 			return
 		}
@@ -143,7 +140,6 @@ func (c *CacheService) StartHTTPServerWithOSDLyrics() error {
 			return
 		}
 
-		log.Printf("✅ 提供文件: %s\n", filePath)
 		fileServer.ServeHTTP(w, r)
 	})
 
@@ -218,8 +214,6 @@ func (c *CacheService) ensureCacheDir() error {
 		return err
 	}
 
-	log.Printf("✅ 缓存目录已创建: %s\n", c.cacheDir)
-	log.Printf("✅ MP3缓存目录已创建: %s\n", c.mp3Dir)
 	return nil
 }
 

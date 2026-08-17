@@ -126,8 +126,6 @@ func (a *AlbumService) GetAlbumDetail(albumID string) AlbumDetailResponse {
 	// 添加查询参数到URL
 	requestURL += "?" + queryParams.Encode()
 
-	log.Printf("调用专辑详情API: %s", requestURL)
-
 	// 创建HTTP客户端，设置超时
 	client := &http.Client{
 		Timeout: 15 * time.Second,
@@ -198,8 +196,6 @@ func (a *AlbumService) GetAlbumDetail(albumID string) AlbumDetailResponse {
 			Message: "响应中缺少data字段",
 		}
 	}
-
-	log.Printf("专辑详情data字段类型: %T, 内容: %+v", dataInterface, dataInterface)
 
 	dataArray, ok := dataInterface.([]interface{})
 	if !ok {
@@ -525,8 +521,6 @@ func (a *AlbumService) GetPlaylistDetail(playlistID string) AlbumDetailResponse 
 	// 添加查询参数到URL
 	requestURL += "?" + queryParams.Encode()
 
-	log.Printf("调用歌单详情API: %s", requestURL)
-
 	// 创建HTTP客户端，设置超时
 	client := &http.Client{
 		Timeout: 15 * time.Second,
@@ -762,9 +756,6 @@ func (a *AlbumService) GetPlaylistSongs(playlistID string, page int, pageSize in
 		}
 	}
 
-	// 打印完整的API响应用于调试
-	log.Printf("歌单歌曲列表API完整响应: %+v", apiResponse)
-
 	// 检查API响应状态
 	if status, ok := apiResponse["status"].(float64); !ok || status != 1 {
 		errorMsg := "API请求失败"
@@ -785,8 +776,6 @@ func (a *AlbumService) GetPlaylistSongs(playlistID string, page int, pageSize in
 			Message: "响应中缺少data字段",
 		}
 	}
-
-	log.Printf("歌单歌曲列表data字段类型: %T, 内容: %+v", dataInterface, dataInterface)
 
 	dataMap, ok := dataInterface.(map[string]interface{})
 	if !ok {
