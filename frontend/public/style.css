@@ -9,35 +9,43 @@
     -moz-osx-font-smoothing: grayscale;
     -webkit-text-size-adjust: 100%;
 
-    /* 默认主题变量 (浅色) */
-    --bg-color: rgb(248, 250, 252);
-    --text-color: rgb(15, 23, 42);
-    --titlebar-bg: rgb(248, 250, 252);
+    /* 默认主题变量 (浅色 - Miaomio 暖米白+活力橙) */
+    --bg-color: rgb(252, 249, 246);
+    --text-color: #111827;
+    --titlebar-bg: rgb(252, 249, 246);
 
     /* 主题色变量 */
-    --accent-color: rgb(99, 102, 241);
-    --accent-hover: rgb(79, 70, 229);
-    --accent-color-rgb: 99, 102, 241;
+    --accent-color: #e87a43;
+    --accent-hover: #d96831;
+    --accent-color-rgb: 232, 122, 67;
 
     /* 文本颜色变量 */
-    --text-primary: rgb(15, 23, 42);
-    --text-secondary: rgb(71, 85, 105);
-    --text-tertiary: rgb(148, 163, 184);
-    --text-inverse: rgb(255, 255, 255);
+    --text-primary: #111827;
+    --text-secondary: #64748b;
+    --text-tertiary: #94a3b8;
+    --text-inverse: #ffffff;
 
     /* 背景色变量 */
-    --bg-secondary: rgb(241, 245, 249);
-    --card-bg: rgb(255, 255, 255);
-    --hover-bg: rgb(248, 250, 252);
+    --bg-secondary: rgb(247, 243, 238);
+    --card-bg: #ffffff;
+    --hover-bg: rgba(232, 122, 67, 0.06);
 
     /* 阴影变量 */
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
 }
 
 body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
     color: var(--text-color);
     background-color: var(--bg-color);
+    background-image: 
+        radial-gradient(at 50% 0%, rgba(232, 122, 67, 0.08) 0px, transparent 50%),
+        radial-gradient(at 100% 20%, rgba(245, 158, 11, 0.05) 0px, transparent 40%),
+        radial-gradient(at 0% 80%, rgba(232, 122, 67, 0.04) 0px, transparent 40%),
+        linear-gradient(to right, rgba(0, 0, 0, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 0, 0, 0.02) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 24px 24px, 24px 24px;
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
@@ -152,7 +160,7 @@ body {
 
 .title-player {
     font-weight: 700;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #e87a43 0%, #ff955c 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -500,8 +508,9 @@ body {
 }
 
 .list-item.active {
-    background: rgba(103, 126, 234, 0.2);
-    color: #677eea;
+    background: rgba(232, 122, 67, 0.12);
+    color: var(--accent-color);
+    border-radius: 8px;
 }
 
 .list-item i {
@@ -539,7 +548,7 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: var(--bg-color);
+    background: transparent;
     transition: margin-right 0.3s ease;
     margin-bottom: 10vh; /* 为底部固定播放器预留空间 */
 }
