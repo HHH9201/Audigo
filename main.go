@@ -153,7 +153,7 @@ func main() {
 	// 'URL' is the URL that will be loaded into the webview.
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:     "wmplayer",
+		Title:     "MusicHub",
 		Height:    900,
 		Width:     1600,
 		Frameless: true,
@@ -190,9 +190,9 @@ func main() {
 
 	// 创建系统托盘图标
 	systemTray := app.SystemTray.New()
-	systemTray.SetLabel("wmplayer")
+	systemTray.SetLabel("MusicHub")
 	systemTray.SetIcon(customIcon)
-	systemTray.SetTooltip("wmplayer")
+	systemTray.SetTooltip("MusicHub")
 
 	// 设置双击事件 - 显示/隐藏窗口（作为左键点击的替代）
 	// systemTray.OnClick(func() {
@@ -308,7 +308,7 @@ func main() {
 	}()
 
 	// contextMenu := app.ContextMenu.New()
-	// app.ContextMenu.Add("wmplayer", contextMenu)
+	// app.ContextMenu.Add("MusicHub", contextMenu)
 
 	// Run the application. This blocks until the application has been exited.
 	err = app.Run()

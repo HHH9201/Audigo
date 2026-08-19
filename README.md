@@ -1,8 +1,8 @@
-# wmPlayer - 基于 Wails3 的现代音乐播放器
+# MusicHub - 基于 Wails3 的现代音乐播放器
 
 <div align="center">
 
-![wmPlayer Logo](icon.ico)
+![MusicHub Logo](icon.ico)
 
 一个基于 **Wails3** 和 **Go** 技术栈开发的现代化音乐播放器，支持在线音乐播放、本地音乐管理、桌面歌词显示等丰富功能。
 
@@ -96,8 +96,8 @@ export PORT=40000
 
 ```bash
 # 克隆项目
-git clone https://github.com/lianchengwu/wmplayer.git
-cd wmplayer
+git clone https://github.com/HHH9201/MusicHub.git
+cd MusicHub
 
 # 安装 Go 依赖
 go mod tidy
@@ -132,7 +132,7 @@ task package
 ## 📁 项目结构
 
 ```
-wmplayer/
+MusicHub/
 ├── main.go                    # 应用入口
 ├── go.mod                     # Go 模块文件
 ├── Taskfile.yml              # Task 构建配置
@@ -153,8 +153,8 @@ wmplayer/
 
 ## 🎵 歌词系统
 
-wmPlayer 提供了两种歌词显示方案：
-- [歌词系统](https://github.com/lianchengwu/wmplayer-lyric)
+MusicHub 提供了两种歌词显示方案：
+- 歌词系统 (支持桌面 OSD 歌词与 KDE Plasma 歌词插件)
 
 ### 🖥️ OSD 桌面歌词
 
@@ -188,7 +188,7 @@ cd lyric/plasma-lyrics
 
 ### 应用配置
 
-应用配置文件位于用户目录下的 `.wmplayer/` 文件夹中，包含：
+应用配置文件位于用户目录下的 `.MusicHub/` 文件夹中，包含：
 - 播放设置（自动播放、音量等）
 - 界面设置（主题、语言等）
 - 行为设置（关闭行为、自动启动等）
@@ -305,10 +305,6 @@ wails3 dev -loglevel debug
 - [Wails](https://wails.io/) - 跨平台桌面应用框架
 - [酷狗音乐 API](https://github.com/MakcRe/KuGouMusicApi) - 音乐数据来源
 - 所有贡献者和用户的支持
-
-## 💬 交流群组
-
-- [Telegram 群组](https://t.me/+EzW5VV8YtOhhMjQ1) - 加入我们的 Telegram 群组进行交流讨论
 
 ---
 

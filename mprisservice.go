@@ -41,7 +41,7 @@ const (
 	mprisPath            = "/org/mpris/MediaPlayer2"
 	mprisInterface       = "org.mpris.MediaPlayer2"
 	mprisPlayerInterface = "org.mpris.MediaPlayer2.Player"
-	busName              = "org.mpris.MediaPlayer2.wmplayer"
+	busName              = "org.mpris.MediaPlayer2.MusicHub"
 )
 
 // NewMPRISService 创建MPRIS服务
@@ -163,8 +163,8 @@ func (m *MPRISService) setupProperties() {
 			"CanQuit":             {Value: true, Writable: false, Emit: prop.EmitTrue, Callback: nil},
 			"CanRaise":            {Value: true, Writable: false, Emit: prop.EmitTrue, Callback: nil},
 			"HasTrackList":        {Value: false, Writable: false, Emit: prop.EmitTrue, Callback: nil},
-			"Identity":            {Value: "wmPlayer Music", Writable: false, Emit: prop.EmitTrue, Callback: nil},
-			"DesktopEntry":        {Value: "wmplayer", Writable: false, Emit: prop.EmitTrue, Callback: nil},
+			"Identity":            {Value: "MusicHub", Writable: false, Emit: prop.EmitTrue, Callback: nil},
+			"DesktopEntry":        {Value: "MusicHub", Writable: false, Emit: prop.EmitTrue, Callback: nil},
 			"SupportedUriSchemes": {Value: []string{"file", "http", "https"}, Writable: false, Emit: prop.EmitTrue, Callback: nil},
 			"SupportedMimeTypes":  {Value: []string{"audio/mpeg", "audio/flac", "audio/ogg", "audio/wav", "audio/aac", "audio/mp4"}, Writable: false, Emit: prop.EmitTrue, Callback: nil},
 		},

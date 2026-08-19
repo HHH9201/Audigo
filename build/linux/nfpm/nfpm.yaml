@@ -10,9 +10,9 @@ version: "0.1.0"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
-description: "My Product Description"
-vendor: "My Company"
-homepage: "https://wails.io"
+description: "MusicHub 现代音乐播放器"
+vendor: "HJH"
+homepage: "https://github.com/HHH9201/MusicHub"
 license: "MIT"
 release: "1"
 
