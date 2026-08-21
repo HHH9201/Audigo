@@ -10,6 +10,8 @@
 [![Wails](https://img.shields.io/badge/Wails-v3.0.0--alpha.17-green.svg)](https://wails.io/)
 [![License](https://img.shields.io/badge/License-GPL--3.0-red.svg)](LICENSE)
 
+作者: **HJH** · [GitHub 仓库](https://github.com/HHH9201/MusicHub)
+
 </div>
 
 ## 📸 应用截图

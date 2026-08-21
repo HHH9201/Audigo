@@ -1613,12 +1613,13 @@ function updateDailyRecommendDisplay() {
 
             // 绑定收藏按钮事件
             if (e.target.closest('.like-btn')) {
-                const songId = e.target.closest('.like-btn').dataset.songId;
-                console.log('每日推荐收藏按钮被点击，歌曲ID:', songId);
+                const songItem = e.target.closest('.song-list-item');
+                const index = parseInt(songItem.dataset.index);
+                const song = currentDailyRecommendList[index];
+                console.log('每日推荐收藏按钮被点击，歌曲:', song);
 
-                // 调用全局收藏函数
-                if (window.addToFavorites) {
-                    window.addToFavorites(songId);
+                if (window.addToFavorites && song) {
+                    window.addToFavorites(song);
                 }
             }
             });
@@ -1709,7 +1710,7 @@ function updatePersonalRecommendDisplay() {
                 e.stopPropagation();
                 const song = currentPersonalRecommendList[index];
                 if (window.addToFavorites && song) {
-                    window.addToFavorites(song.hash, song.songname, song.author_name);
+                    window.addToFavorites(song);
                 }
             });
         });
@@ -1782,7 +1783,7 @@ function updateVipRecommendDisplay() {
                 e.stopPropagation();
                 const song = currentVipRecommendList[index];
                 if (window.addToFavorites && song) {
-                    window.addToFavorites(song.hash, song.songname, song.author_name);
+                    window.addToFavorites(song);
                 }
             });
         });

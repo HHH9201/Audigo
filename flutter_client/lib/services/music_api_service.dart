@@ -1,0 +1,1480 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/play_history.dart';
+import '../models/song.dart';
+import '../models/user_playlist.dart';
+import 'media_cache_service.dart';
+
+class SearchPage<T> {
+  final List<T> items;
+  final int total;
+
+  const SearchPage({required this.items, required this.total});
+}
+
+class HotSearchCategory {
+  final String name;
+  final List<String> keywords;
+
+  const HotSearchCategory({required this.name, required this.keywords});
+}
+
+class SearchSuggestion {
+  final String keyword;
+  final String type;
+
+  const SearchSuggestion({required this.keyword, required this.type});
+}
+
+class LyricsContent {
+  final String content;
+  final String format;
+
+  const LyricsContent({required this.content, required this.format});
+
+  bool get isKrc => format == 'krc';
+}
+
+class MusicApiService {
+  // 主接口与多备用镜像节点列表
+  static const List<String> apiMirrors = [
+    "https://ku-gou-music-api-beige.vercel.app",
+  ];
+  static String baseApi = apiMirrors.first;
+  static final Dio _dio = _createDio();
+  static DateTime? _lastVipClaim;
+  static Future<void>? _vipClaimRequest;
+
+  static Dio _createDio() {
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 20),
+      headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+      },
+    ));
+
+    dio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final client = HttpClient();
+        // 遵循系统真实网络环境（有代理走代理，无代理走直连）
+        client.findProxy = HttpClient.findProxyFromEnvironment;
+        client.badCertificateCallback =
+            (X509Certificate cert, String host, int port) => true;
+        return client;
+      },
+    );
+
+    return dio;
+  }
+
+  // 获取本地保存的 Cookie
+  static Future<String> _getCookie() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedCookie = prefs.getString('user_cookie') ?? '';
+    if (savedCookie.isNotEmpty) return savedCookie;
+
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      final home =
+          Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
+      if (home != null && home.isNotEmpty) {
+        final separator = Platform.pathSeparator;
+        final file = File(
+          '$home${separator}.config${separator}gomusic${separator}cookies.txt',
+        );
+        if (await file.exists()) {
+          final cookie = (await file.readAsString()).trim();
+          if (cookie.isNotEmpty) {
+            await prefs.setString('user_cookie', cookie);
+            return cookie;
+          }
+        }
+      }
+    }
+
+    return '';
+  }
+
+  // 1. 获取每日推荐歌曲
+  static Future<List<Song>> getDailyRecommend({String platform = 'ios'}) async {
+    try {
+      final cookie = await _getCookie();
+      final queryParams = <String, dynamic>{
+        'platform': platform,
+      };
+      if (cookie.isNotEmpty) queryParams['cookie'] = cookie;
+
+      final response = await _dio.get('$baseApi/everyday/recommend',
+          queryParameters: queryParams);
+      if (response.data != null) {
+        final raw = response.data;
+        List list = [];
+        if (raw['data'] is List) {
+          list = raw['data'];
+        } else if (raw['data'] is Map && raw['data']['song_list'] is List) {
+          list = raw['data']['song_list'];
+        } else if (raw['data'] is Map && raw['data']['songs'] is List) {
+          list = raw['data']['songs'];
+        } else if (raw['data'] is Map &&
+            raw['data']['daily_recommend'] is List) {
+          list = raw['data']['daily_recommend'];
+        }
+        return list.map((item) => Song.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('获取每日推荐失败: $e');
+    }
+    return [];
+  }
+
+  // 2. 获取私人 FM (支持模式 normal/small/peak 与 AI pool)
+  static Future<List<Song>> getPersonalFM({
+    String mode = 'normal',
+    int songPoolId = 0,
+    String hash = '',
+    String songId = '',
+  }) async {
+    try {
+      final cookie = await _getCookie();
+      final queryParams = <String, dynamic>{
+        'mode': mode,
+        'action': 'play',
+      };
+      if (cookie.isNotEmpty) queryParams['cookie'] = cookie;
+      if (hash.isNotEmpty) queryParams['hash'] = hash;
+      if (songId.isNotEmpty) queryParams['songid'] = songId;
+      if (songPoolId > 0) queryParams['song_pool_id'] = songPoolId;
+
+      final response =
+          await _dio.get('$baseApi/personal/fm', queryParameters: queryParams);
+      if (response.data != null) {
+        final raw = response.data;
+        List list = [];
+        if (raw['data'] is List) {
+          list = raw['data'];
+        } else if (raw['data'] is Map && raw['data']['song_list'] is List) {
+          list = raw['data']['song_list'];
+        } else if (raw['data'] is Map && raw['data']['songs'] is List) {
+          list = raw['data']['songs'];
+        }
+        return list.map((item) => Song.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('获取私人FM失败: $e');
+    }
+    return [];
+  }
+
+  static Future<bool> reportFMAction({
+    required String hash,
+    required String action,
+    String songId = '',
+    int playTime = 0,
+  }) async {
+    if (hash.trim().isEmpty) return false;
+    try {
+      final cookie = await _getCookie();
+      final queryParams = <String, dynamic>{
+        'hash': hash,
+        'mode': 'normal',
+        'action': action,
+      };
+      if (songId.isNotEmpty) queryParams['songid'] = songId;
+      if (playTime > 0) queryParams['playtime'] = playTime;
+      if (cookie.isNotEmpty) queryParams['cookie'] = cookie;
+
+      final response =
+          await _dio.get('$baseApi/personal/fm', queryParameters: queryParams);
+      return response.data?['error_code'] == 0 || response.data?['status'] == 1;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // 3. 获取 AI 推荐歌曲
+  static Future<List<Song>> getAIRecommend() async {
+    try {
+      final cookie = await _getCookie();
+      final queryParams = <String, dynamic>{};
+      if (cookie.isNotEmpty) queryParams['cookie'] = cookie;
+      final response =
+          await _dio.get('$baseApi/ai/recommend', queryParameters: queryParams);
+
+      if (response.data != null &&
+          (response.data['error_code'] == 0 || response.data['status'] == 1)) {
+        final list = (response.data['data'] is List
+                ? response.data['data']
+                : response.data['data']?['song_list']) as List? ??
+            [];
+        return list.map((item) => Song.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('获取AI推荐失败: $e');
+    }
+    return [];
+  }
+
+  // 4. 获取推荐歌曲分类 (personal/vip/classic/popular/treasure/trendy)
+  static Future<List<Song>> getRecommendSongs(String category) async {
+    try {
+      final cookie = await _getCookie();
+      final queryParams = <String, dynamic>{'category': category};
+      if (cookie.isNotEmpty) queryParams['cookie'] = cookie;
+      final response = await _dio.get('$baseApi/recommend/songs',
+          queryParameters: queryParams);
+
+      if (response.data != null &&
+          (response.data['error_code'] == 0 || response.data['status'] == 1)) {
+        final list = (response.data['data'] is List
+                ? response.data['data']
+                : response.data['data']?['song_list']) as List? ??
+            [];
+        return list.map((item) => Song.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('获取分类推荐歌曲失败 ($category): $e');
+    }
+    return [];
+  }
+
+  // 5. 搜索
+  static Future<List<Song>> searchSongs(String keyword,
+      {int page = 1, int pageSize = 30}) async {
+    final result =
+        await searchSongPage(keyword, page: page, pageSize: pageSize);
+    return result.items;
+  }
+
+  static Future<SearchPage<Song>> searchSongPage(String keyword,
+      {int page = 1, int pageSize = 30}) async {
+    if (keyword.trim().isEmpty) return const SearchPage(items: [], total: 0);
+    try {
+      final cookie = await _getCookie();
+      final response =
+          await _dio.get('$baseApi/search/complex', queryParameters: {
+        'keywords': keyword,
+        'page': page,
+        'pagesize': pageSize,
+        'cookie': cookie,
+      });
+      final songs = response.data?['data']?['songs'];
+      if (response.data?['error_code'] == 0 && songs is Map) {
+        final list = songs['list'] as List? ?? [];
+        return SearchPage(
+          items: list
+              .whereType<Map>()
+              .map((item) => Song.fromJson(Map<String, dynamic>.from(item)))
+              .toList(),
+          total: _asInt(songs['total']),
+        );
+      }
+    } catch (_) {}
+    return const SearchPage(items: [], total: 0);
+  }
+
+  static Future<SearchPage<Map<String, dynamic>>> searchArtists(String keyword,
+          {int page = 1, int pageSize = 30}) =>
+      _searchCollection(
+          keyword,
+          'author',
+          page,
+          pageSize,
+          (raw) => {
+                'id': _first(raw, ['AuthorId', 'SingerID', 'author_id']),
+                'title': _first(raw, ['AuthorName', 'author_name']),
+                'cover': _image(_first(raw, ['Avatar', 'avatar'])),
+                'subtitle':
+                    '${_asInt(_first(raw, ['AudioCount', 'song_count']))} 首歌曲',
+              });
+
+  static Future<SearchPage<Map<String, dynamic>>> searchPlaylists(
+          String keyword,
+          {int page = 1,
+          int pageSize = 30}) =>
+      _searchCollection(
+          keyword,
+          'special',
+          page,
+          pageSize,
+          (raw) => {
+                'id': _first(raw, ['gid', 'specialid', 'special_id']),
+                'title': _first(raw, ['specialname', 'special_name']),
+                'cover': _image(_first(raw, ['img', 'img_url'])),
+                'subtitle': _first(raw, ['nickname', 'author_name']),
+                'count': _asInt(_first(raw, ['song_count', 'songcount'])),
+              });
+
+  static Future<SearchPage<Map<String, dynamic>>> searchAlbums(String keyword,
+          {int page = 1, int pageSize = 30}) =>
+      _searchCollection(
+          keyword,
+          'album',
+          page,
+          pageSize,
+          (raw) => {
+                'id': _first(raw, ['albumid', 'album_id']),
+                'title': _first(raw, ['albumname', 'album_name']),
+                'cover': _image(_first(raw, ['img', 'img_url'])),
+                'subtitle': _first(raw, ['singer', 'author_name']),
+                'count': _asInt(_first(raw, ['songcount', 'song_count'])),
+              });
+
+  static Future<SearchPage<Map<String, dynamic>>> searchMVs(String keyword,
+          {int page = 1, int pageSize = 30}) =>
+      _searchCollection(
+          keyword,
+          'mv',
+          page,
+          pageSize,
+          (raw) => {
+                'id': _first(raw, ['MvHash', 'hash']),
+                'title': _first(raw, ['MvName', 'mv_name']),
+                'cover': _image(_first(raw, ['ThumbGif', 'img_url'])),
+                'subtitle': _first(raw, ['SingerName', 'author_name']),
+                'duration': _asInt(_first(raw, ['Duration', 'time_length'])),
+              });
+
+  static Future<SearchPage<Map<String, dynamic>>> _searchCollection(
+    String keyword,
+    String type,
+    int page,
+    int pageSize,
+    Map<String, dynamic> Function(Map<String, dynamic>) convert,
+  ) async {
+    if (keyword.trim().isEmpty) return const SearchPage(items: [], total: 0);
+    try {
+      final cookie = await _getCookie();
+      final response = await _dio.get('$baseApi/search', queryParameters: {
+        'keywords': keyword,
+        'type': type,
+        'page': page,
+        'pagesize': pageSize,
+        'cookie': cookie,
+      });
+      final data = response.data?['data'];
+      if (response.data?['error_code'] == 0 && data is Map) {
+        final list = data['lists'] as List? ?? [];
+        return SearchPage(
+          items: list
+              .whereType<Map>()
+              .map((item) => convert(Map<String, dynamic>.from(item)))
+              .toList(),
+          total: _asInt(data['total']),
+        );
+      }
+    } catch (_) {}
+    return const SearchPage(items: [], total: 0);
+  }
+
+  static Future<List<HotSearchCategory>> getHotSearch() async {
+    try {
+      final cookie = await _getCookie();
+      final response = await _dio.get(
+        '$baseApi/search/hot',
+        queryParameters: {'cookie': cookie},
+      );
+      final list = response.data?['data']?['list'];
+      if (response.data?['status'] == 1 && list is List) {
+        return list.whereType<Map>().map((category) {
+          final keywords = category['keywords'];
+          return HotSearchCategory(
+            name: category['name']?.toString() ?? '热搜',
+            keywords: keywords is List
+                ? keywords
+                    .whereType<Map>()
+                    .map((item) => item['keyword']?.toString() ?? '')
+                    .where((item) => item.isNotEmpty)
+                    .toList()
+                : const [],
+          );
+        }).toList();
+      }
+    } catch (e) {
+      print('获取热搜失败: $e');
+    }
+    return [];
+  }
+
+  static Future<List<SearchSuggestion>> getSearchSuggestions(
+      String keyword) async {
+    if (keyword.trim().isEmpty) return [];
+    try {
+      final cookie = await _getCookie();
+      final response = await _dio.get(
+        '$baseApi/search/suggest',
+        queryParameters: {'keywords': keyword, 'cookie': cookie},
+      );
+      final data = response.data?['data'];
+      if (data is Map) {
+        final suggestions = <SearchSuggestion>[];
+        for (final entry in const {
+          'music_tip': 'song',
+          'album_tip': 'album',
+          'mv_tip': 'mv',
+        }.entries) {
+          final values = data[entry.key];
+          if (values is List) {
+            suggestions.addAll(values.map((value) => SearchSuggestion(
+                  keyword: value.toString(),
+                  type: entry.value,
+                )));
+          }
+        }
+        return suggestions;
+      }
+      if (data is List) {
+        final suggestions = <SearchSuggestion>[];
+        for (final group in data.whereType<Map>()) {
+          final label = group['LableName']?.toString() ?? '';
+          final type = label == 'MV'
+              ? 'mv'
+              : label == '专辑'
+                  ? 'album'
+                  : 'song';
+          final records = group['RecordDatas'];
+          if (records is! List) continue;
+          suggestions
+              .addAll(records.whereType<Map>().map((record) => SearchSuggestion(
+                    keyword: record['HintInfo']?.toString() ?? '',
+                    type: type,
+                  )));
+        }
+        return suggestions
+            .where((suggestion) => suggestion.keyword.isNotEmpty)
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static dynamic _first(Map<String, dynamic> map, List<String> keys) {
+    for (final key in keys) {
+      final value = map[key];
+      if (value != null && value.toString().isNotEmpty) return value;
+    }
+    return '';
+  }
+
+  static int _asInt(dynamic value) =>
+      value is num ? value.toInt() : int.tryParse(value?.toString() ?? '') ?? 0;
+
+  static String _image(dynamic value) {
+    final url = value?.toString().replaceAll('{size}', '400') ?? '';
+    return url.startsWith('http://')
+        ? url.replaceFirst('http://', 'https://')
+        : url;
+  }
+
+  // 6. 获取新歌速递
+  static Future<List<Song>> getNewSongs() async {
+    try {
+      final cookie = await _getCookie();
+      final response = await _dio.get(
+        '$baseApi/top/song',
+        queryParameters: {'cookie': cookie},
+      );
+      final data = response.data?['data'];
+      if (response.data?['status'] == 1 && data is List) {
+        return data.whereType<Map>().map((item) {
+          final song = Map<String, dynamic>.from(item);
+          final transParam = song['trans_param'];
+          if (transParam is Map && transParam['union_cover'] != null) {
+            song['union_cover'] = transParam['union_cover'];
+          }
+          final timeLength = song['timelength'];
+          if (timeLength is num) {
+            song['time_length'] = (timeLength / 1000).round();
+          }
+          return Song.fromJson(song);
+        }).toList();
+      }
+    } catch (e) {
+      print('获取新歌速递失败: $e');
+    }
+    return [];
+  }
+
+  // 7. 获取新碟上架
+  static Future<List<Map<String, dynamic>>> getNewAlbums() async {
+    try {
+      final cookie = await _getCookie();
+      final response = await _dio.get(
+        '$baseApi/top/album',
+        queryParameters: {'cookie': cookie},
+      );
+      final data = response.data?['data'];
+      if (response.data?['status'] == 1 && data is Map) {
+        final albums = <Map<String, dynamic>>[];
+        for (final category in ['chn', 'eur', 'jpn', 'kor']) {
+          final categoryAlbums = data[category];
+          if (categoryAlbums is! List) continue;
+          albums.addAll(categoryAlbums.whereType<Map>().map((item) {
+            final album = Map<String, dynamic>.from(item);
+            final cover = album['imgurl']?.toString() ?? '';
+            final publishTime = album['publishtime']?.toString() ?? '';
+            return <String, dynamic>{
+              'id': album['albumid']?.toString() ?? '',
+              'title': album['albumname']?.toString() ?? '未知专辑',
+              'author_name': album['singername']?.toString() ?? '未知歌手',
+              'songCount': album['songcount'] ?? 0,
+              'releaseDate': publishTime.length > 10
+                  ? publishTime.substring(0, 10)
+                  : publishTime,
+              'cover': cover.replaceAll('{size}', '400').replaceFirst(
+                    'http://',
+                    'https://',
+                  ),
+              'description': album['intro']?.toString() ?? '',
+            };
+          }));
+        }
+        return albums;
+      }
+    } catch (e) {
+      print('获取新碟上架失败: $e');
+    }
+    return [];
+  }
+
+  // 8. 解析真实播放地址，兼容 Go 服务和上游接口的不同响应结构。
+  static Future<List<String>> getPlayUrls(
+    String hash, {
+    String songName = '',
+    String artist = '',
+    String quality = '128k',
+  }) async {
+    if (hash.trim().isEmpty) return [];
+    final normalizedQuality = _normalizeAudioQuality(quality);
+    final qualityChain = normalizedQuality == 'flac'
+        ? const ['flac', '320', '128']
+        : normalizedQuality == '320'
+            ? const ['320', '128']
+            : const ['128'];
+    final cookie = await _getCookie();
+    await _claimYouthVipIfNeeded(cookie);
+    final urls = await _requestPlayUrls(hash, qualityChain, cookie);
+    if (urls.isNotEmpty) return urls;
+
+    // 版权受限或 Hash 失效时，按 Go 版逻辑寻找同名可播放资源。
+    if (songName.trim().isNotEmpty) {
+      final candidates = await searchSongs(songName, pageSize: 10);
+      for (final candidate in candidates) {
+        if (candidate.hash.isEmpty || candidate.hash == hash) continue;
+        if (artist.trim().isNotEmpty &&
+            !candidate.authorName
+                .toLowerCase()
+                .contains(artist.trim().toLowerCase())) {
+          continue;
+        }
+        final alternative =
+            await _requestPlayUrls(candidate.hash, qualityChain, cookie);
+        if (alternative.isNotEmpty) {
+          print('已切换到同名歌曲的可播放资源: ${candidate.hash}');
+          return alternative;
+        }
+      }
+    }
+    return [];
+  }
+
+  static Future<List<String>> _requestPlayUrls(
+    String hash,
+    List<String> qualityChain,
+    String cookie,
+  ) async {
+    for (final requestedQuality in qualityChain) {
+      try {
+        final response = await _dio.get('$baseApi/song/url', queryParameters: {
+          'hash': hash,
+          'quality': requestedQuality,
+          'cookie': cookie.contains('KUGOU_API_PLATFORM')
+              ? cookie
+              : '$cookie;KUGOU_API_PLATFORM=lite',
+        });
+        final urls = _extractPlayUrls(response.data);
+        if (urls.isNotEmpty) return urls;
+        print('歌曲播放地址为空: hash=$hash quality=$requestedQuality '
+            'response=${response.data}');
+      } catch (e) {
+        print('获取歌曲播放地址失败: hash=$hash quality=$requestedQuality error=$e');
+      }
+    }
+    return [];
+  }
+
+  static Future<String?> getPlayUrl(String hash,
+      {String quality = '128k'}) async {
+    final urls = await getPlayUrls(hash, quality: quality);
+    return urls.isEmpty ? null : urls.first;
+  }
+
+  static Future<void> _claimYouthVipIfNeeded(String cookie) async {
+    if (cookie.trim().isEmpty) return;
+    final lastClaim = _lastVipClaim;
+    if (lastClaim != null && DateTime.now().difference(lastClaim).inHours < 2) {
+      return;
+    }
+    if (_vipClaimRequest != null) return _vipClaimRequest!;
+
+    final request = () async {
+      try {
+        final conceptCookie = cookie.contains('KUGOU_API_PLATFORM')
+            ? cookie
+            : '$cookie;KUGOU_API_PLATFORM=lite';
+        final response =
+            await _dio.get('$baseApi/youth/day/vip', queryParameters: {
+          'cookie': conceptCookie,
+          'receive_day': _todayDate(),
+        });
+        print('概念版 VIP 领取响应: ${response.data}');
+        final data = response.data;
+        if (data is Map &&
+            (data['status'] == 1 || data['success'] == true) &&
+            (data['error_code'] == null || data['error_code'] == 0)) {
+          _lastVipClaim = DateTime.now();
+        }
+      } on DioException catch (e) {
+        print('领取概念版 VIP 失败: HTTP ${e.response?.statusCode ?? '未知'}，继续尝试播放');
+      } catch (e) {
+        print('领取概念版 VIP 失败: $e，继续尝试播放');
+      } finally {
+        _vipClaimRequest = null;
+      }
+    }();
+    _vipClaimRequest = request;
+    await request;
+  }
+
+  static String _todayDate() {
+    final now = DateTime.now();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${now.year}-${two(now.month)}-${two(now.day)}';
+  }
+
+  static List<String> _extractPlayUrls(dynamic payload) {
+    final urls = <String>[];
+    void add(dynamic value) {
+      if (value is String && value.trim().isNotEmpty) {
+        final url = value.trim();
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          if (!urls.contains(url)) urls.add(url);
+        }
+      } else if (value is List) {
+        for (final item in value) add(item);
+      } else if (value is Map) {
+        for (final key in const [
+          'url',
+          'play_url',
+          'playUrl',
+          'download_url'
+        ]) {
+          add(value[key]);
+        }
+      }
+    }
+
+    if (payload is Map) {
+      for (final key in const ['urls', 'url', 'backupUrl', 'backup_url']) {
+        add(payload[key]);
+      }
+      add(payload['data']);
+    } else {
+      add(payload);
+    }
+    return urls;
+  }
+
+  static String _normalizeAudioQuality(String quality) {
+    switch (quality.toLowerCase()) {
+      case 'flac':
+      case 'high':
+        return 'flac';
+      case '320':
+      case '320k':
+      case 'medium':
+        return '320';
+      default:
+        return '128';
+    }
+  }
+
+  // 7. 获取专辑详情
+  static Future<Map<String, dynamic>> getAlbumDetail(String albumId) async {
+    return _getCollectionDetail('/album/detail', albumId);
+  }
+
+  // 8. 获取歌单详情
+  static Future<Map<String, dynamic>> getPlaylistDetail(
+      String playlistId) async {
+    return _getCollectionDetail('/playlist/detail', playlistId);
+  }
+
+  static Future<Map<String, dynamic>> _getCollectionDetail(
+      String path, String id) async {
+    if (id.trim().isEmpty) return {};
+    try {
+      final cookie = await _getCookie();
+      final response = await _dio
+          .get('$baseApi$path', queryParameters: {'id': id, 'cookie': cookie});
+      final data = response.data?['data'];
+      if (data is Map) return Map<String, dynamic>.from(data);
+    } catch (e) {
+      print('获取集合详情失败 ($id): $e');
+    }
+    return {};
+  }
+
+  // 9. 获取专辑歌曲
+  static Future<List<Song>> getAlbumSongs(String albumId,
+      {int page = 1, int pageSize = 30}) async {
+    return _getCollectionSongs('/album/songs', albumId,
+        page: page, pageSize: pageSize);
+  }
+
+  // 8. 获取歌单歌曲
+  static Future<List<Song>> getPlaylistSongs(String playlistId,
+      {int page = 1, int pageSize = 50}) async {
+    return _getCollectionSongs('/playlist/songs', playlistId,
+        page: page, pageSize: pageSize);
+  }
+
+  static Future<List<Song>> _getCollectionSongs(String path, String id,
+      {required int page, required int pageSize}) async {
+    if (id.trim().isEmpty) return [];
+    try {
+      final cookie = await _getCookie();
+      final response = await _dio.get('$baseApi$path', queryParameters: {
+        'id': id,
+        'page': page,
+        'pagesize': pageSize,
+        'cookie': cookie,
+      });
+      final data = response.data?['data'];
+      final list = data is List
+          ? data
+          : data is Map
+              ? (data['songs'] ?? data['song_list'] ?? data['list'] ?? [])
+              : [];
+      return (list as List)
+          .whereType<Map>()
+          .map((item) => Song.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+    } catch (e) {
+      print('获取集合歌曲失败 ($id): $e');
+      return [];
+    }
+  }
+
+  // 账号歌单与普通公开歌单使用不同的接口和 ID 体系。
+  static Future<List<UserPlaylist>> getUserPlaylists() async {
+    try {
+      final cookie = await _getCookie();
+      if (cookie.isEmpty) return [];
+      final response =
+          await _dio.get('$baseApi/user/playlist', queryParameters: {
+        'cookie': cookie,
+        'pagesize': 100,
+      });
+      final data = response.data?['data'];
+      final list = data is Map ? data['info'] : data;
+      if (list is! List) return [];
+      return list
+          .whereType<Map>()
+          .map((item) => UserPlaylist.fromJson(Map<String, dynamic>.from(item)))
+          .where((playlist) => playlist.globalCollectionId.isNotEmpty)
+          .toList();
+    } catch (e) {
+      print('获取账号歌单失败: $e');
+      return [];
+    }
+  }
+
+  static Future<List<Song>> getAccountPlaylistSongs(
+    String globalCollectionId,
+  ) async {
+    if (globalCollectionId.trim().isEmpty) return [];
+    try {
+      final cookie = await _getCookie();
+      if (cookie.isEmpty) return [];
+      final response = await _dio.get(
+        '$baseApi/playlist/track/all',
+        queryParameters: {
+          'id': globalCollectionId,
+          'pagesize': 200,
+          'cookie': cookie,
+        },
+      );
+      final data = response.data?['data'];
+      final list = data is Map ? (data['info'] ?? data['songs'] ?? []) : [];
+      if (list is! List) return [];
+      return list
+          .whereType<Map>()
+          .map((item) => Song.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+    } catch (e) {
+      print('获取账号歌单歌曲失败 ($globalCollectionId): $e');
+      return [];
+    }
+  }
+
+  // 9. 添加播放历史
+  static Future<bool> addPlayHistory(Song song) async {
+    if (song.hash.isEmpty) return false;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('analytics_enabled') ?? true) {
+      Map<String, dynamic> counts;
+      try {
+        counts = Map<String, dynamic>.from(
+          jsonDecode(prefs.getString('play_statistics') ?? '{}'),
+        );
+      } on FormatException {
+        counts = {};
+      }
+      counts[song.hash] = (counts[song.hash] as num? ?? 0).toInt() + 1;
+      await prefs.setString('play_statistics', jsonEncode(counts));
+    }
+    if (!(prefs.getBool('save_history') ?? true)) return true;
+
+    final now = DateTime.now();
+    final records = _loadPlayHistoryRecords(prefs);
+    final existingIndex =
+        records.indexWhere((record) => record.hash == song.hash);
+    if (existingIndex >= 0) {
+      records[existingIndex] = records[existingIndex].replayed(song, now);
+    } else {
+      records.add(PlayHistoryRecord.fromSong(song, now));
+    }
+    records.sort((a, b) => b.playTime.compareTo(a.playTime));
+    await prefs.setStringList(
+      'play_history',
+      records.take(1000).map((record) => jsonEncode(record.toJson())).toList(),
+    );
+    await prefs.setString('play_history_update_time', now.toIso8601String());
+    return true;
+  }
+
+  // 10. 获取播放历史
+  static Future<PlayHistoryData> getPlayHistory({
+    int page = 1,
+    int pageSize = 50,
+    String filter = 'all',
+    DateTime? now,
+  }) async {
+    if (page <= 0) page = 1;
+    if (pageSize <= 0) pageSize = 50;
+    if (filter.isEmpty) filter = 'all';
+
+    final prefs = await SharedPreferences.getInstance();
+    final currentTime = now ?? DateTime.now();
+    final records = _loadPlayHistoryRecords(prefs)
+      ..sort((a, b) => b.playTime.compareTo(a.playTime));
+    final filteredRecords = records
+        .where((record) => _matchesHistoryFilter(record, filter, currentTime))
+        .toList();
+    final totalCount = filteredRecords.length;
+    final start = (page - 1) * pageSize;
+    final pagedRecords = start >= totalCount
+        ? <PlayHistoryRecord>[]
+        : filteredRecords.skip(start).take(pageSize).toList();
+    final updateTime = DateTime.tryParse(
+          prefs.getString('play_history_update_time') ?? '',
+        ) ??
+        currentTime;
+    return PlayHistoryData(
+      records: pagedRecords,
+      totalCount: totalCount,
+      updateTime: updateTime,
+    );
+  }
+
+  static List<PlayHistoryRecord> _loadPlayHistoryRecords(
+    SharedPreferences prefs,
+  ) {
+    final records = <PlayHistoryRecord>[];
+    for (final item in prefs.getStringList('play_history') ?? const []) {
+      try {
+        final decoded = jsonDecode(item);
+        if (decoded is Map) {
+          records.add(
+            PlayHistoryRecord.fromJson(Map<String, dynamic>.from(decoded)),
+          );
+        }
+      } on FormatException {
+        continue;
+      }
+    }
+    return records;
+  }
+
+  static bool _matchesHistoryFilter(
+    PlayHistoryRecord record,
+    String filter,
+    DateTime now,
+  ) {
+    switch (filter) {
+      case 'all':
+        return true;
+      case 'today':
+        return _isSameDay(record.playTime, now);
+      case 'yesterday':
+        return _isSameDay(record.playTime, _addCalendarDays(now, -1));
+      case 'week':
+        return record.playTime.isAfter(_addCalendarDays(now, -7));
+      default:
+        return false;
+    }
+  }
+
+  static DateTime _addCalendarDays(DateTime time, int days) => DateTime(
+        time.year,
+        time.month,
+        time.day + days,
+        time.hour,
+        time.minute,
+        time.second,
+        time.millisecond,
+        time.microsecond,
+      );
+
+  static bool _isSameDay(DateTime first, DateTime second) =>
+      first.year == second.year &&
+      first.month == second.month &&
+      first.day == second.day;
+
+  static Future<PlayHistoryData> clearPlayHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now();
+    await prefs.setStringList('play_history', const []);
+    await prefs.setString('play_history_update_time', now.toIso8601String());
+    return PlayHistoryData(records: const [], totalCount: 0, updateTime: now);
+  }
+
+  // 11. 收藏歌曲。登录后优先同步账号“我喜欢的”歌单，未登录时使用本地收藏。
+  static Future<bool> addFavorite(Song song) async {
+    final cookie = await _getCookie();
+    if (cookie.isNotEmpty) {
+      try {
+        final response = await _dio.get(
+          '$baseApi/playlist/tracks/add',
+          queryParameters: {
+            'listid': 2,
+            'data': '${song.songName}|${song.hash}',
+            'cookie': cookie,
+          },
+        );
+        if (response.data?['status'] == 1 ||
+            response.data?['error_code'] == 0) {
+          return true;
+        }
+      } catch (_) {}
+    }
+    return _addLocalFavorite(song);
+  }
+
+  static Future<bool> removeFavorite(String hash) async {
+    final cookie = await _getCookie();
+    if (cookie.isNotEmpty) {
+      try {
+        final response = await _dio.get(
+          '$baseApi/playlist/tracks/del',
+          queryParameters: {'listid': 2, 'hash': hash, 'cookie': cookie},
+        );
+        if (response.data?['status'] == 1 ||
+            response.data?['error_code'] == 0) {
+          return true;
+        }
+      } catch (_) {}
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final records = prefs.getStringList('my_favorites') ?? [];
+    records.removeWhere((item) => jsonDecode(item)['hash'] == hash);
+    await prefs.setStringList('my_favorites', records);
+    return true;
+  }
+
+  static Future<List<Song>> getFavorites() async {
+    final cookie = await _getCookie();
+    if (cookie.isNotEmpty) {
+      final playlists = await getUserPlaylists();
+      final favorite = playlists.where((playlist) => playlist.listId == 2);
+      if (favorite.isNotEmpty) {
+        return getAccountPlaylistSongs(favorite.first.globalCollectionId);
+      }
+    }
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getStringList('my_favorites') ?? [])
+        .map((item) => Song.fromJson(jsonDecode(item)))
+        .toList();
+  }
+
+  static Future<bool> _addLocalFavorite(Song song) async {
+    final prefs = await SharedPreferences.getInstance();
+    final records = prefs.getStringList('my_favorites') ?? [];
+    if (!records.any((item) => jsonDecode(item)['hash'] == song.hash)) {
+      records.add(jsonEncode(song.toJson()));
+      await prefs.setStringList('my_favorites', records);
+    }
+    return true;
+  }
+
+  // 12. 下载管理
+  static Future<String?> downloadSong(Song song, {String? quality}) async {
+    if (song.hash.trim().isEmpty) return null;
+    final prefs = await SharedPreferences.getInstance();
+    var effectiveQuality =
+        quality ?? prefs.getString('audio_quality') ?? '128k';
+    if ((prefs.getBool('wifi_only_high_quality') ?? false) &&
+        effectiveQuality != '128k') {
+      final connections = await Connectivity().checkConnectivity();
+      if (!connections.contains(ConnectivityResult.wifi) &&
+          !connections.contains(ConnectivityResult.ethernet)) {
+        effectiveQuality = '128k';
+      }
+    }
+    final documents = await getApplicationDocumentsDirectory();
+    final directory = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: '选择歌曲保存目录',
+      initialDirectory: documents.path,
+    );
+    if (directory == null || directory.isEmpty) return null;
+
+    final playUrl = await getPlayUrl(song.hash, quality: effectiveQuality);
+    if (playUrl == null || playUrl.isEmpty) return null;
+
+    final extension = effectiveQuality == 'flac' ? '.flac' : '.mp3';
+    final filename = _safeFilename(
+      '${song.songName} - ${song.authorName}$extension',
+    );
+    final filePath = p.join(directory, filename);
+    final tempPath = '$filePath.part';
+    try {
+      await _dio.download(playUrl, tempPath,
+          options: Options(responseType: ResponseType.bytes));
+      final file = File(tempPath);
+      if (!await file.exists() || await file.length() == 0) return null;
+      final target = File(filePath);
+      if (await target.exists()) await target.delete();
+      await file.rename(filePath);
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('download_lyrics') ?? true) {
+        final lyrics = await getRawLyricsWithFormat(song.hash);
+        if (lyrics != null && lyrics.content.isNotEmpty) {
+          await File(p.setExtension(filePath, '.${lyrics.format}'))
+              .writeAsString(lyrics.content);
+        }
+      }
+      await addDownloadRecord(song,
+          filePath: filePath,
+          fileSize: await target.length(),
+          filename: filename);
+      return filePath;
+    } catch (e) {
+      final partial = File(tempPath);
+      if (await partial.exists()) await partial.delete();
+      print('下载歌曲失败: $e');
+      return null;
+    }
+  }
+
+  static String _safeFilename(String filename) {
+    final sanitized = filename.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+    return sanitized.isEmpty ? 'music.mp3' : sanitized;
+  }
+
+  static Future<bool> addDownloadRecord(Song song,
+      {String filePath = '', int fileSize = 0, String filename = ''}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final records = prefs.getStringList('download_records') ?? [];
+    records.removeWhere((item) => jsonDecode(item)['hash'] == song.hash);
+    records.insert(
+        0,
+        jsonEncode({
+          ...song.toJson(),
+          'filename': filename,
+          'file_path': filePath,
+          'file_size': fileSize,
+          'download_time': DateTime.now().toIso8601String()
+        }));
+    await prefs.setStringList('download_records', records);
+    return true;
+  }
+
+  static Future<List<Map<String, dynamic>>> getDownloadRecords(
+      {int page = 1, int pageSize = 50}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final records = (prefs.getStringList('download_records') ?? [])
+        .map((item) => jsonDecode(item) as Map<String, dynamic>)
+        .toList();
+    final start = (page - 1) * pageSize;
+    return start >= records.length
+        ? []
+        : records.skip(start).take(pageSize).toList();
+  }
+
+  static Future<void> removeDownloadRecord(Map<String, dynamic> record) async {
+    final path = record['file_path']?.toString() ?? '';
+    if (path.isNotEmpty) {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+      for (final extension in const ['.krc', '.lrc']) {
+        final lyrics = File(p.setExtension(path, extension));
+        if (await lyrics.exists()) await lyrics.delete();
+      }
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final records = prefs.getStringList('download_records') ?? [];
+    records.removeWhere((item) =>
+        jsonDecode(item)['hash'] == record['hash'] &&
+        jsonDecode(item)['file_path'] == record['file_path']);
+    await prefs.setStringList('download_records', records);
+  }
+
+  static Future<void> clearDownloadRecords() async {
+    final records = await getDownloadRecords(pageSize: 100000);
+    for (final record in records) {
+      final path = record['file_path']?.toString() ?? '';
+      if (path.isNotEmpty) {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+        for (final extension in const ['.krc', '.lrc']) {
+          final lyrics = File(p.setExtension(path, extension));
+          if (await lyrics.exists()) await lyrics.delete();
+        }
+      }
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('download_records');
+  }
+
+  // 13. 获取歌词
+  static Future<LyricsContent?> getRawLyricsWithFormat(String hash) async {
+    if (hash.trim().isEmpty) return null;
+    try {
+      final cache = await MediaCacheService.instance;
+      final cached = await cache.getLyrics(
+        hash: hash,
+        loader: () => _loadRawLyrics(hash),
+      );
+      return cached.content.trim().isEmpty
+          ? null
+          : LyricsContent(content: cached.content, format: cached.format);
+    } catch (e) {
+      print('获取歌词失败: $e');
+      return null;
+    }
+  }
+
+  static Future<String> _loadRawLyrics(String hash) async {
+    final cookie = await _getCookie();
+    final search = await _dio.get('$baseApi/search/lyric', queryParameters: {
+      'hash': hash,
+      'cookie': cookie,
+      'man': 'no',
+    });
+    final candidates = search.data?['candidates'];
+    if (candidates is! List || candidates.isEmpty) return '';
+    final candidate = candidates.first;
+    if (candidate is! Map) return '';
+    final id = candidate['id']?.toString() ?? '';
+    final accessKey = candidate['accesskey']?.toString() ?? '';
+    if (id.isEmpty || accessKey.isEmpty) return '';
+
+    for (final format in const ['krc', 'lrc']) {
+      try {
+        final response = await _dio.get('$baseApi/lyric', queryParameters: {
+          'id': id,
+          'accesskey': accessKey,
+          'decode': 'true',
+          'fmt': format,
+          'cookie': cookie,
+        });
+        final content =
+            response.data?['decodeContent']?.toString().trim() ?? '';
+        if (content.isNotEmpty) return content;
+      } catch (_) {
+        // Continue with the lower fidelity format.
+      }
+    }
+    return '';
+  }
+
+  static Future<String> getRawLyrics(String hash) async {
+    return (await getRawLyricsWithFormat(hash))?.content ?? '';
+  }
+
+  static Future<List<LyricLine>> getLyrics(String hash) async {
+    return parseLyrics(await getRawLyrics(hash));
+  }
+
+  // 8. 登录/用户体系 API
+  static Future<Map<String, dynamic>> sendCaptcha(String mobile) async {
+    try {
+      final response = await _dio
+          .get('$baseApi/captcha/sent', queryParameters: {'mobile': mobile});
+      return response.data is Map<String, dynamic>
+          ? response.data
+          : {'status': 0, 'message': '发送失败'};
+    } catch (e) {
+      return {'status': 0, 'message': e.toString()};
+    }
+  }
+
+  static Future<Map<String, dynamic>> loginWithPhone(
+      String mobile, String code) async {
+    try {
+      final response =
+          await _dio.get('$baseApi/login/cellphone', queryParameters: {
+        'mobile': mobile,
+        'code': code,
+      });
+      if (response.data != null &&
+          (response.data['error_code'] == 0 || response.data['status'] == 1)) {
+        final token = response.data['data']?['token'] ?? '';
+        final userid = response.data['data']?['userid'] ?? 0;
+        final cookie = 'token=$token; userid=$userid';
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_cookie', cookie);
+        await prefs.setString('user_token', token.toString());
+        await prefs.setInt('user_id', int.tryParse(userid.toString()) ?? 0);
+        return {'success': true, 'data': response.data['data']};
+      }
+      return {'success': false, 'message': response.data?['message'] ?? '登录失败'};
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  static Future<Map<String, dynamic>> generateQRKey() async {
+    _qrLog('开始获取二维码 Key');
+    try {
+      final response =
+          await _dio.get('$baseApi/login/qr/key', queryParameters: {
+        'platform': 'lite',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+      _qrLog('二维码 Key 响应: ${_qrSummary(response.data)}');
+      return response.data is Map<String, dynamic> ? response.data : {};
+    } catch (e) {
+      _qrLog('二维码 Key 请求异常: $e');
+      return {'status': 0, 'message': e.toString()};
+    }
+  }
+
+  static Future<Map<String, dynamic>> createQRCode(String key) async {
+    _qrLog('开始生成二维码图片，key=${_maskQrKey(key)}');
+    try {
+      final response =
+          await _dio.get('$baseApi/login/qr/create', queryParameters: {
+        'key': key,
+        'qrimg': 'true',
+        'platform': 'lite',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+      final data = response.data is Map ? response.data['data'] : null;
+      final base64 = data is Map ? data['base64']?.toString() : null;
+      _qrLog(
+          '二维码图片响应: ${_qrSummary(response.data)}, base64=${base64?.isNotEmpty == true ? '有' : '无'}');
+      return response.data is Map<String, dynamic> ? response.data : {};
+    } catch (e) {
+      _qrLog('二维码图片请求异常: $e');
+      return {'status': 0, 'message': e.toString()};
+    }
+  }
+
+  static Future<Map<String, dynamic>> checkQRStatus(String key) async {
+    _qrLog('检查二维码状态，key=${_maskQrKey(key)}');
+    try {
+      final response =
+          await _dio.get('$baseApi/login/qr/check', queryParameters: {
+        'key': key,
+        'platform': 'lite',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+      final payload = response.data;
+      if (payload is Map<String, dynamic>) {
+        final data = payload['data'];
+        final status =
+            data is Map ? int.tryParse('${data['status']}') ?? -1 : -1;
+        _qrLog('二维码状态响应: status=$status, ${_qrSummary(payload)}');
+        if (data is Map && status == 4) {
+          final token = '${data['token'] ?? ''}'.trim();
+          final userid = int.tryParse('${data['userid'] ?? 0}') ?? 0;
+          _qrLog(
+              '检测到扫码登录成功: userid=$userid, token=${token.isNotEmpty ? '有' : '无'}');
+          if (token.isNotEmpty && userid != 0) {
+            final cookie = 'token=$token;userid=$userid';
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('user_cookie', cookie);
+            await prefs.setString('user_token', token);
+            await prefs.setInt('user_id', userid);
+            _qrLog('扫码登录 Cookie 已保存，长度=${cookie.length}');
+          } else {
+            _qrLog('扫码成功但缺少 token 或 userid，未保存登录状态');
+          }
+        }
+        return payload;
+      }
+      _qrLog('二维码状态响应格式错误: ${payload.runtimeType}');
+      return {'status': 0, 'message': '二维码状态响应格式错误'};
+    } catch (e) {
+      _qrLog('二维码状态请求异常: $e');
+      return {'status': 0, 'message': e.toString()};
+    }
+  }
+
+  static void _qrLog(String message) {
+    print('[扫码登录] $message');
+  }
+
+  static String _maskQrKey(String key) {
+    if (key.length <= 8) return '***';
+    return '${key.substring(0, 4)}...${key.substring(key.length - 4)}';
+  }
+
+  static String _qrSummary(dynamic payload) {
+    if (payload is! Map) return 'type=${payload.runtimeType}';
+    final data = payload['data'];
+    final dataKeys = data is Map ? data.keys.join(',') : 'none';
+    return 'code=${payload['code']}, error_code=${payload['error_code']}, '
+        'status=${payload['status']}, dataKeys=[$dataKeys], '
+        'message=${payload['message'] ?? payload['msg'] ?? ''}';
+  }
+
+  static Future<Map<String, dynamic>> getUserDetail() async {
+    try {
+      final cookie = await _getCookie();
+      if (cookie.isEmpty) return {'success': false, 'message': '未登录'};
+      final response = await _dio.get('$baseApi/user/detail', queryParameters: {
+        'cookie': cookie,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+      if (response.data != null && response.data['status'] == 1) {
+        return {'success': true, 'data': response.data['data']};
+      }
+    } catch (e) {
+      print('获取用户详情失败: $e');
+    }
+    return {'success': false};
+  }
+
+  static Future<Map<String, dynamic>> getVipDetail() async {
+    try {
+      final cookie = await _getCookie();
+      if (cookie.isEmpty) return {'success': false, 'message': '未登录'};
+      final response =
+          await _dio.get('$baseApi/user/vip/detail', queryParameters: {
+        'cookie': cookie,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+      final payload = response.data;
+      if (payload is Map) {
+        final success = payload['success'] == true || payload['status'] == 1;
+        if (success) {
+          return {'success': true, 'data': payload['data']};
+        }
+        return {
+          'success': false,
+          'message': payload['message'] ?? payload['msg'] ?? '获取 VIP 详情失败',
+        };
+      }
+    } on DioException catch (e) {
+      print('获取 VIP 详情失败: HTTP ${e.response?.statusCode ?? '未知'}');
+    } catch (e) {
+      print('获取 VIP 详情失败: $e');
+    }
+    return {'success': false};
+  }
+
+  static Future<Map<String, dynamic>> claimDailyVip() async {
+    try {
+      final cookie = await _getCookie();
+      final response = await _dio
+          .get('$baseApi/youth/day/vip', queryParameters: {'cookie': cookie});
+      return response.data is Map<String, dynamic>
+          ? response.data
+          : {'status': 0};
+    } catch (e) {
+      return {'status': 0, 'message': e.toString()};
+    }
+  }
+
+  static Future<void> logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('user_cookie');
+    await prefs.remove('user_token');
+    await prefs.remove('user_id');
+  }
+
+  static List<LyricLine> parseLyrics(String content) {
+    final result = _parseKrc(content);
+    return result.isNotEmpty ? result : parseLrc(content);
+  }
+
+  static List<LyricLine> _parseKrc(String content) {
+    final result = <LyricLine>[];
+    final linePattern = RegExp(r'^\[(\d+),(\d+)\](.*)$');
+    final wordPattern = RegExp(r'<(\d+),(\d+),\d+>([^<]*)');
+    for (final rawLine in content.split(RegExp(r'\r?\n'))) {
+      final lineMatch = linePattern.firstMatch(rawLine.trim());
+      if (lineMatch == null) continue;
+      final lineStart = int.parse(lineMatch.group(1)!);
+      final lineDuration = int.parse(lineMatch.group(2)!);
+      final words = <LyricWord>[];
+      final text = StringBuffer();
+      for (final match in wordPattern.allMatches(lineMatch.group(3)!)) {
+        final wordText = match.group(3)!;
+        text.write(wordText);
+        words.add(LyricWord(
+          time: Duration(milliseconds: lineStart + int.parse(match.group(1)!)),
+          duration: Duration(milliseconds: int.parse(match.group(2)!)),
+          text: wordText,
+        ));
+      }
+      if (text.toString().trim().isNotEmpty) {
+        result.add(LyricLine(
+          time: Duration(milliseconds: lineStart),
+          duration: Duration(milliseconds: lineDuration),
+          text: text.toString(),
+          words: words,
+        ));
+      }
+    }
+    result.sort((a, b) => a.time.compareTo(b.time));
+    return result;
+  }
+
+  static List<LyricLine> parseLrc(String lrcContent) {
+    final result = <LyricLine>[];
+    final regExp = RegExp(r'\[(\d{1,3}):(\d{2})(?:[\.:](\d{1,3}))?\]');
+    for (final rawLine in lrcContent.split(RegExp(r'\r?\n'))) {
+      final matches = regExp.allMatches(rawLine).toList();
+      if (matches.isEmpty) continue;
+      final text = rawLine.substring(matches.last.end).trim();
+      if (text.isEmpty) continue;
+      for (final match in matches) {
+        final fraction = match.group(3) ?? '0';
+        final millis = int.parse(fraction.padRight(3, '0').substring(0, 3));
+        result.add(LyricLine(
+          time: Duration(
+            minutes: int.parse(match.group(1)!),
+            seconds: int.parse(match.group(2)!),
+            milliseconds: millis,
+          ),
+          text: text,
+        ));
+      }
+    }
+    result.sort((a, b) => a.time.compareTo(b.time));
+    return result;
+  }
+}

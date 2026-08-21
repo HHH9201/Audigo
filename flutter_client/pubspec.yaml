@@ -1,0 +1,60 @@
+name: flutter_client
+description: "MusicHub - 跨平台全能音乐播放器客户端 (Flutter/Dart)"
+homepage: https://github.com/HHH9201/MusicHub
+repository: https://github.com/HHH9201/MusicHub
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 现代网络请求
+  dio: ^5.7.0
+  # 音频播放核心与后台播控
+  just_audio: ^0.9.40
+  just_audio_media_kit: ^2.0.7
+  media_kit_libs_windows_audio: ^1.0.9
+  audio_service: ^0.18.17
+  # 本地持久化 (Cookie、播放历史、收藏)
+  shared_preferences: ^2.3.3
+  # 网络类型检测（仅 Wi-Fi 使用高音质）
+  connectivity_plus: ^6.1.0
+  # 文件选择、应用目录与系统文件打开
+  path_provider: ^2.1.5
+  path: ^1.9.0
+  file_picker: ^8.1.7
+  open_file: ^3.5.10
+  # 状态管理
+  provider: ^6.1.2
+  # 图片缓存与渲染
+  cached_network_image: ^3.4.1
+  # 现代拟态与毛玻璃
+  blur: ^3.1.0
+  # 桌面端窗口尺寸与无边框控制
+  window_manager: ^0.3.9
+  # 歌词高亮与滚动
+  scrollable_positioned_list: ^0.3.8
+  # 矢量图标
+  cupertino_icons: ^1.0.8
+  audio_metadata_reader: 1.7.1
+  crypto: ^3.0.7
+  tray_manager: ^0.5.3
+  desktop_multi_window: ^0.3.0
+  screen_retriever: ^0.1.9
+  hotkey_manager: ^0.2.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+    - windows/runner/resources/app_icon.ico
+    - macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_32.png

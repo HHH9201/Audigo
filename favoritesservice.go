@@ -141,7 +141,7 @@ func (f *FavoritesService) AddFavorite(request AddFavoriteRequest) AddFavoriteRe
 	// 添加查询参数到URL
 	requestURL += "?" + queryParams.Encode()
 
-	log.Printf("调用添加收藏API: %s", requestURL)
+	log.Printf("调用添加收藏API")
 
 	// 创建HTTP客户端，设置超时
 	client := &http.Client{
@@ -251,7 +251,7 @@ func (f *FavoritesService) GetUserPlaylists() PlaylistResponse {
 	// 添加查询参数到URL
 	requestURL += "?" + queryParams.Encode()
 
-	log.Printf("调用用户歌单API: %s", requestURL)
+	log.Printf("调用用户歌单API")
 
 	// 创建HTTP客户端，设置超时
 	client := &http.Client{
@@ -456,7 +456,7 @@ func (f *FavoritesService) GetPlaylistSongs(globalCollectionID string) AlbumSong
 	// 添加查询参数到URL
 	requestURL += "?" + queryParams.Encode()
 
-	log.Printf("调用歌单歌曲API: %s", requestURL)
+	log.Printf("调用歌单歌曲API")
 
 	// 创建HTTP客户端，设置超时
 	client := &http.Client{
