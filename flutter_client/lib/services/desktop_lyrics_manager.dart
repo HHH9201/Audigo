@@ -25,6 +25,7 @@ class DesktopLyricsManager {
   bool _creating = false;
   String? _lastSnapshot;
   DateTime _lastSentAt = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _sendTimer;
 
   bool get enabled => _enabled;
 
@@ -49,6 +50,14 @@ class DesktopLyricsManager {
     await _applyEnabled(preferences.getBool(preferenceKey) ?? true);
   }
 
+  /// 字号/位置设置变化后重建歌词窗口以应用新配置。
+  Future<void> reloadLyricsWindow() async {
+    if (!isSupported || !_enabled) return;
+    await close();
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    await show();
+  }
+
   Future<void> toggle() => setEnabled(!_enabled);
 
   Future<void> _applyEnabled(bool value) async {
@@ -65,7 +74,7 @@ class DesktopLyricsManager {
     final existing = _window;
     if (existing != null) {
       await existing.show();
-      await _sendSnapshotWhenReady();
+      unawaited(_sendSnapshotWhenReady());
       return;
     }
 
@@ -76,7 +85,7 @@ class DesktopLyricsManager {
         if (window.arguments == windowArgument) {
           _window = window;
           await window.show();
-          await _sendSnapshotWhenReady();
+          unawaited(_sendSnapshotWhenReady());
           return;
         }
       }
@@ -87,7 +96,7 @@ class DesktopLyricsManager {
         ),
       );
       await _window!.show();
-      await _sendSnapshotWhenReady();
+      unawaited(_sendSnapshotWhenReady());
     } catch (error) {
       debugPrint('创建桌面歌词窗口失败: $error');
       _window = null;
@@ -118,6 +127,8 @@ class DesktopLyricsManager {
   }
 
   Future<void> close() async {
+    _sendTimer?.cancel();
+    _sendTimer = null;
     final window = _window;
     _window = null;
     if (window == null) return;
@@ -132,7 +143,18 @@ class DesktopLyricsManager {
       unawaited(show());
       return;
     }
-    unawaited(_sendSnapshot());
+    final elapsed = DateTime.now().difference(_lastSentAt);
+    const interval = Duration(milliseconds: 100);
+    if (elapsed >= interval) {
+      _sendTimer?.cancel();
+      _sendTimer = null;
+      unawaited(_sendSnapshot());
+      return;
+    }
+    _sendTimer ??= Timer(interval - elapsed, () {
+      _sendTimer = null;
+      unawaited(_sendSnapshot());
+    });
   }
 
   Future<void> _sendSnapshot({bool force = false}) async {
@@ -141,8 +163,7 @@ class DesktopLyricsManager {
     if (player == null || window == null) return;
 
     final now = DateTime.now();
-    if (!force && now.difference(_lastSentAt).inMilliseconds < 32) return;
-    _lastSentAt = now;
+    if (!force && now.difference(_lastSentAt).inMilliseconds < 100) return;
 
     final lyrics = player.currentLyrics;
     final index = lyrics.isEmpty
@@ -162,6 +183,7 @@ class DesktopLyricsManager {
     });
     if (!force && snapshot == _lastSnapshot) return;
     _lastSnapshot = snapshot;
+    _lastSentAt = now;
 
     try {
       await window.invokeMethod<void>('lyrics_update', snapshot);

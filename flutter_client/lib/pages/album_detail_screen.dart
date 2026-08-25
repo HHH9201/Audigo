@@ -74,213 +74,231 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final player = context.watch<AudioPlayerManager>();
-
     return Scaffold(
       backgroundColor: AppTheme.bgWarm,
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 返回按钮
-            IconButton(
-              icon: Icon(Icons.arrow_back_rounded, color: AppTheme.textPrimary),
-              onPressed: widget.onBack,
-            ),
-            const SizedBox(height: 12),
-
-            // 头部详情卡片
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceWhite,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.borderWarm),
-              ),
-              child: Row(
+      body: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(32, 24, 32, 0),
+            sliver: SliverToBoxAdapter(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: (widget.destination.coverUrl != null &&
-                            widget.destination.coverUrl!.isNotEmpty)
-                        ? CachedNetworkImage(
-                            imageUrl: widget.destination.coverUrl!,
-                            width: 140,
-                            height: 140,
-                            fit: BoxFit.cover,
-                            errorWidget: (_, __, ___) => Container(
-                              width: 140,
-                              height: 140,
-                              color: AppTheme.surfaceWarm,
-                              child: Icon(Icons.album,
-                                  size: 64, color: AppTheme.textSecondary),
-                            ),
-                          )
-                        : Container(
-                            width: 140,
-                            height: 140,
-                            color: AppTheme.surfaceWarm,
-                            child: Icon(Icons.album,
-                                size: 64, color: AppTheme.textSecondary),
-                          ),
+                  // 返回按钮
+                  IconButton(
+                    icon: Icon(Icons.arrow_back_rounded,
+                        color: AppTheme.textPrimary),
+                    onPressed: widget.onBack,
                   ),
-                  const SizedBox(width: 24),
-                  Expanded(
-                    child: Column(
+                  const SizedBox(height: 12),
+
+                  // 头部详情卡片
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceWhite,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.borderWarm),
+                    ),
+                    child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: AppTheme.accentOrange.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            widget.destination.type == 'album' ? '专辑' : '歌单',
-                            style: TextStyle(
-                                color: AppTheme.accentOrange,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold),
-                          ),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: (widget.destination.coverUrl != null &&
+                                  widget.destination.coverUrl!.isNotEmpty)
+                              ? CachedNetworkImage(
+                                  imageUrl: widget.destination.coverUrl!,
+                                  width: 140,
+                                  height: 140,
+                                  fit: BoxFit.cover,
+                                  errorWidget: (_, __, ___) => Container(
+                                    width: 140,
+                                    height: 140,
+                                    color: AppTheme.surfaceWarm,
+                                    child: Icon(Icons.album,
+                                        size: 64,
+                                        color: AppTheme.textSecondary),
+                                  ),
+                                )
+                              : Container(
+                                  width: 140,
+                                  height: 140,
+                                  color: AppTheme.surfaceWarm,
+                                  child: Icon(Icons.album,
+                                      size: 64, color: AppTheme.textSecondary),
+                                ),
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          widget.destination.title,
-                          style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.textPrimary),
-                        ),
-                        const SizedBox(height: 6),
-                        if (widget.destination.artist != null)
-                          Text(
-                            widget.destination.artist!,
-                            style: TextStyle(
-                                fontSize: 14, color: AppTheme.textSecondary),
+                        const SizedBox(width: 24),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.accentOrange.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  widget.destination.type == 'album'
+                                      ? '专辑'
+                                      : '歌单',
+                                  style: TextStyle(
+                                      color: AppTheme.accentOrange,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                widget.destination.title,
+                                style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.textPrimary),
+                              ),
+                              const SizedBox(height: 6),
+                              if (widget.destination.artist != null)
+                                Text(
+                                  widget.destination.artist!,
+                                  style: TextStyle(
+                                      fontSize: 14,
+                                      color: AppTheme.textSecondary),
+                                ),
+                              const SizedBox(height: 16),
+                              ElevatedButton.icon(
+                                icon: const Icon(Icons.play_arrow_rounded,
+                                    color: Colors.white, size: 18),
+                                label: const Text('播放全部',
+                                    style: TextStyle(
+                                        color: Colors.white, fontSize: 13)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppTheme.accentOrange,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 20, vertical: 10),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20)),
+                                  elevation: 0,
+                                ),
+                                onPressed: _songs.isNotEmpty
+                                    ? () => context
+                                        .read<AudioPlayerManager>()
+                                        .playAll(_songs)
+                                    : null,
+                              ),
+                            ],
                           ),
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          icon: const Icon(Icons.play_arrow_rounded,
-                              color: Colors.white, size: 18),
-                          label: const Text('播放全部',
-                              style:
-                                  TextStyle(color: Colors.white, fontSize: 13)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.accentOrange,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 10),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20)),
-                            elevation: 0,
-                          ),
-                          onPressed: _songs.isNotEmpty
-                              ? () => player.playAll(_songs)
-                              : null,
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(height: 24),
+
+                  // 歌曲列表
+                  Text(
+                    '歌曲列表',
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textPrimary),
+                  ),
+                  const SizedBox(height: 12),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
+          ),
+          if (_isLoading)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 40),
+                child: Center(
+                    child: CircularProgressIndicator(
+                        color: AppTheme.accentOrange)),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(32, 0, 32, 24),
+              sliver: SliverList.separated(
+                itemCount: _songs.length,
+                separatorBuilder: (_, __) =>
+                    Divider(height: 1, color: AppTheme.borderWarm),
+                itemBuilder: (context, idx) {
+                  final song = _songs[idx];
 
-            // 歌曲列表
-            Text(
-              '歌曲列表',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textPrimary),
+                  return ListTile(
+                    leading: Text(
+                      '${idx + 1}'.padLeft(2, '0'),
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w500),
+                    ),
+                    title: Text(
+                      song.songName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary),
+                    ),
+                    subtitle: Text(
+                      song.authorName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12, color: AppTheme.textSecondary),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Selector<AudioPlayerManager, bool>(
+                          selector: (_, player) => player.isFavorite(song.hash),
+                          builder: (context, isFav, _) => IconButton(
+                            icon: Icon(
+                              isFav ? Icons.favorite : Icons.favorite_border,
+                              color: isFav
+                                  ? AppTheme.accentOrange
+                                  : AppTheme.textSecondary,
+                              size: 20,
+                            ),
+                            onPressed: () => context
+                                .read<AudioPlayerManager>()
+                                .toggleFavorite(song.hash, song: song),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '下载',
+                          icon: _downloadingHashes.contains(song.hash)
+                              ? SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppTheme.accentOrange),
+                                )
+                              : Icon(Icons.download_rounded,
+                                  color: AppTheme.accentOrange, size: 20),
+                          onPressed: () => _downloadSong(song),
+                        ),
+                        IconButton(
+                          tooltip: '播放',
+                          icon: Icon(Icons.play_circle_outline_rounded,
+                              color: AppTheme.accentOrange, size: 24),
+                          onPressed: () => context
+                              .read<AudioPlayerManager>()
+                              .playSong(song, newPlaylist: _songs),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
             ),
-            const SizedBox(height: 12),
-
-            _isLoading
-                ? Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 40),
-                    child: Center(
-                        child: CircularProgressIndicator(
-                            color: AppTheme.accentOrange)),
-                  )
-                : ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: _songs.length,
-                    separatorBuilder: (_, __) =>
-                        Divider(height: 1, color: AppTheme.borderWarm),
-                    itemBuilder: (context, idx) {
-                      final song = _songs[idx];
-                      final isFav = player.isFavorite(song.hash);
-
-                      return ListTile(
-                        leading: Text(
-                          '${idx + 1}'.padLeft(2, '0'),
-                          style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textSecondary,
-                              fontWeight: FontWeight.w500),
-                        ),
-                        title: Text(
-                          song.songName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textPrimary),
-                        ),
-                        subtitle: Text(
-                          song.authorName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 12, color: AppTheme.textSecondary),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: Icon(
-                                isFav ? Icons.favorite : Icons.favorite_border,
-                                color: isFav
-                                    ? AppTheme.accentOrange
-                                    : AppTheme.textSecondary,
-                                size: 20,
-                              ),
-                              onPressed: () =>
-                                  player.toggleFavorite(song.hash, song: song),
-                            ),
-                            IconButton(
-                              tooltip: '下载',
-                              icon: _downloadingHashes.contains(song.hash)
-                                  ? SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: AppTheme.accentOrange),
-                                    )
-                                  : Icon(Icons.download_rounded,
-                                      color: AppTheme.accentOrange, size: 20),
-                              onPressed: () => _downloadSong(song),
-                            ),
-                            IconButton(
-                              tooltip: '播放',
-                              icon: Icon(Icons.play_circle_outline_rounded,
-                                  color: AppTheme.accentOrange, size: 24),
-                              onPressed: () =>
-                                  player.playSong(song, newPlaylist: _songs),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ],
-        ),
+        ],
       ),
     );
   }

@@ -8,6 +8,20 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   late Directory directory;
 
+  // 有效 MP3 文件头（ID3 标签 + 少量数据）
+  const mp3Header = [
+    0x49,
+    0x44,
+    0x33,
+    0x03,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00
+  ];
+
   setUp(() {
     directory = Directory.systemTemp.createTempSync('musichub_media_cache');
   });
@@ -24,7 +38,7 @@ void main() {
       audioDownloader: (url, path) async {
         downloads++;
         await release.future;
-        await File(path).writeAsBytes([1, 2, 3], flush: true);
+        await File(path).writeAsBytes([...mp3Header, 1, 2, 3], flush: true);
       },
     );
 
@@ -35,7 +49,7 @@ void main() {
     final files = await Future.wait([first, second]);
     expect(downloads, 1);
     expect(files.first.path, files.last.path);
-    expect(await files.first.readAsBytes(), [1, 2, 3]);
+    expect(await files.first.readAsBytes(), [...mp3Header, 1, 2, 3]);
   });
 
   test('下载失败后同一缓存键可以重试', () async {
@@ -45,7 +59,7 @@ void main() {
       audioDownloader: (url, path) async {
         downloads++;
         if (downloads == 1) throw const SocketException('offline');
-        await File(path).writeAsBytes([1], flush: true);
+        await File(path).writeAsBytes([...mp3Header, 1], flush: true);
       },
     );
 
@@ -60,7 +74,7 @@ void main() {
     );
 
     expect(downloads, 2);
-    expect(await file.readAsBytes(), [1]);
+    expect(await file.readAsBytes(), [...mp3Header, 1]);
   });
 
   test('不同音质使用独立音频缓存', () async {
@@ -69,7 +83,8 @@ void main() {
       rootDirectory: directory,
       audioDownloader: (url, path) async {
         downloads++;
-        await File(path).writeAsString(url, flush: true);
+        await File(path)
+            .writeAsBytes([...mp3Header, ...url.codeUnits], flush: true);
       },
     );
 
@@ -86,8 +101,9 @@ void main() {
 
     expect(downloads, 2);
     expect(low.path, isNot(lossless.path));
-    expect(await low.readAsString(), 'low');
-    expect(await lossless.readAsString(), 'lossless');
+    expect(await low.readAsBytes(), [...mp3Header, ...'low'.codeUnits]);
+    expect(
+        await lossless.readAsBytes(), [...mp3Header, ...'lossless'.codeUnits]);
   });
 
   test('音频缓存截断后自动删除并重新下载', () async {
@@ -96,7 +112,8 @@ void main() {
       rootDirectory: directory,
       audioDownloader: (url, path) async {
         downloads++;
-        await File(path).writeAsBytes([downloads, 2, 3], flush: true);
+        await File(path)
+            .writeAsBytes([...mp3Header, downloads, 2, 3], flush: true);
       },
     );
 
@@ -113,7 +130,7 @@ void main() {
     );
 
     expect(downloads, 2);
-    expect(await recovered.readAsBytes(), [2, 2, 3]);
+    expect(await recovered.readAsBytes(), [...mp3Header, 2, 2, 3]);
   });
 
   test('歌词原文按 KRC 格式缓存且并发合并', () async {

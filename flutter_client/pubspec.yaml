@@ -16,8 +16,8 @@ dependencies:
   dio: ^5.7.0
   # 音频播放核心与后台播控
   just_audio: ^0.9.40
-  just_audio_media_kit: ^2.0.7
-  media_kit_libs_windows_audio: ^1.0.9
+  just_audio_windows:
+    path: third_party/just_audio_windows
   audio_service: ^0.18.17
   # 本地持久化 (Cookie、播放历史、收藏)
   shared_preferences: ^2.3.3
@@ -46,6 +46,7 @@ dependencies:
   desktop_multi_window: ^0.3.0
   screen_retriever: ^0.1.9
   hotkey_manager: ^0.2.3
+  dbus: ^0.7.15
 
 dev_dependencies:
   flutter_test:

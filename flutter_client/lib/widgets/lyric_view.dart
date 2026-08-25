@@ -5,14 +5,18 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide RepeatMode;
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../services/audio_player_manager.dart';
 import '../theme/app_theme.dart';
 
 class LyricView extends StatefulWidget {
-  const LyricView({Key? key}) : super(key: key);
+  const LyricView({Key? key, this.onExit}) : super(key: key);
+
+  /// 沉浸式页面退出回调（原版 Go 沉浸式播放器按 Esc 退出）。
+  final VoidCallback? onExit;
 
   @override
   State<LyricView> createState() => _LyricViewState();
@@ -22,6 +26,7 @@ class _LyricViewState extends State<LyricView>
     with SingleTickerProviderStateMixin {
   final ScrollController _scrollController = ScrollController();
   late final AnimationController _recordController;
+  final FocusNode _focusNode = FocusNode();
   Timer? _timeTimer;
   Timer? _controlsTimer;
   String _currentTimeStr = '';
@@ -39,6 +44,29 @@ class _LyricViewState extends State<LyricView>
     _timeTimer =
         Timer.periodic(const Duration(seconds: 1), (_) => _updateTime());
     _scheduleControlsHide();
+  }
+
+  /// 沉浸式页面键盘快捷键（对应原版 Go immersive-player.js：
+  /// Esc 退出、Space 播放/暂停、←/→ 上一首/下一首、↑/↓ 音量加减）。
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+    final player = context.read<AudioPlayerManager>();
+    switch (event.logicalKey) {
+      case LogicalKeyboardKey.escape:
+        widget.onExit?.call();
+      case LogicalKeyboardKey.space:
+        player.togglePlay();
+      case LogicalKeyboardKey.arrowLeft:
+        player.playPrevious();
+      case LogicalKeyboardKey.arrowRight:
+        player.playNext();
+      case LogicalKeyboardKey.arrowUp:
+        player.setVolume((player.volume + 0.05).clamp(0.0, 1.0));
+      case LogicalKeyboardKey.arrowDown:
+        player.setVolume((player.volume - 0.05).clamp(0.0, 1.0));
+      default:
+        break;
+    }
   }
 
   void _updateTime() {
@@ -87,6 +115,7 @@ class _LyricViewState extends State<LyricView>
     _controlsTimer?.cancel();
     _recordController.dispose();
     _scrollController.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -121,13 +150,20 @@ class _LyricViewState extends State<LyricView>
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
-      body: MouseRegion(
-        onEnter: (_) => _showControlLayer(),
-        onHover: (_) => _showControlLayer(),
-        child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onTap: _showControlLayer,
-          child: Stack(
+      body: Focus(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          _handleKeyEvent(event);
+          return KeyEventResult.handled;
+        },
+        child: MouseRegion(
+          onEnter: (_) => _showControlLayer(),
+          onHover: (_) => _showControlLayer(),
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _showControlLayer,
+            child: Stack(
             children: [
               Positioned.fill(
                 child: song?.coverBytes != null
@@ -244,7 +280,8 @@ class _LyricViewState extends State<LyricView>
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildRecordSection(

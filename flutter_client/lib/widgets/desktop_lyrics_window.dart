@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -5,6 +6,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:screen_retriever/screen_retriever.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 class DesktopLyricsWindow extends StatefulWidget {
@@ -18,6 +20,7 @@ class DesktopLyricsWindow extends StatefulWidget {
 
 class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
   _LyricsSnapshot _snapshot = const _LyricsSnapshot();
+  double _fontSize = 23;
 
   @override
   void initState() {
@@ -33,6 +36,15 @@ class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
           await windowManager.destroy();
       }
     });
+    _loadFontSize();
+  }
+
+  Future<void> _loadFontSize() async {
+    final prefs = await SharedPreferences.getInstance();
+    final fontSize = (prefs.getInt('lyrics_font_size') ?? 22).toDouble();
+    if (mounted && fontSize != _fontSize) {
+      setState(() => _fontSize = fontSize.clamp(12, 48));
+    }
   }
 
   @override
@@ -69,7 +81,11 @@ class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _KaraokeLine(snapshot: _snapshot, fallback: line),
+                _KaraokeLine(
+                  snapshot: _snapshot,
+                  fallback: line,
+                  fontSize: _fontSize,
+                ),
                 if (!Platform.isWindows && _snapshot.nextLine.isNotEmpty) ...[
                   const SizedBox(height: 3),
                   Text(
@@ -77,9 +93,9 @@ class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: Colors.white54,
-                      fontSize: 13,
+                      fontSize: (_fontSize * 0.55).clamp(10, 14),
                       height: 1.15,
                     ),
                   ),
@@ -94,10 +110,15 @@ class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
 }
 
 class _KaraokeLine extends StatelessWidget {
-  const _KaraokeLine({required this.snapshot, required this.fallback});
+  const _KaraokeLine({
+    required this.snapshot,
+    required this.fallback,
+    required this.fontSize,
+  });
 
   final _LyricsSnapshot snapshot;
   final String fallback;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -136,7 +157,7 @@ class _KaraokeLine extends StatelessWidget {
 
   TextStyle _style(Color color) => TextStyle(
         color: color,
-        fontSize: 23,
+        fontSize: fontSize,
         fontWeight: FontWeight.w700,
         height: 1.15,
         shadows: const [
@@ -179,17 +200,28 @@ class _LyricsSnapshot {
 }
 
 Future<void> configureDesktopLyricsWindow() async {
-  const size = Size(720, 92);
   await windowManager.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  final fontSize = (prefs.getInt('lyrics_font_size') ?? 22).clamp(12, 48);
+  final offsetX = prefs.getInt('lyrics_offset_x') ?? 0;
+  final offsetY = prefs.getInt('lyrics_offset_y') ?? 0;
+  final size = Size(720, (fontSize + (Platform.isWindows ? 14 : 34)).toDouble());
   final display = await screenRetriever.getPrimaryDisplay();
   final visibleOrigin = display.visiblePosition ?? Offset.zero;
   final visibleSize = display.visibleSize ?? display.size;
-  final x = visibleOrigin.dx + (visibleSize.width - size.width) / 2;
+  // 默认水平居中；lyricsOffsetX 仅在任务栏内部横向移动（与原版一致）。
+  final x = visibleOrigin.dx +
+      (visibleSize.width - size.width) / 2 +
+      offsetX.toDouble();
   final margin = Platform.isWindows ? 6.0 : 12.0;
-  final y = visibleOrigin.dy + visibleSize.height - size.height - margin;
+  final y = visibleOrigin.dy +
+      visibleSize.height -
+      size.height -
+      margin +
+      offsetY.toDouble();
 
   await windowManager.waitUntilReadyToShow(
-    const WindowOptions(
+    WindowOptions(
       size: size,
       backgroundColor: Colors.transparent,
       skipTaskbar: true,
@@ -203,7 +235,7 @@ Future<void> configureDesktopLyricsWindow() async {
       await windowManager.setSkipTaskbar(true);
       await windowManager.setPosition(Offset(x, y));
       await windowManager.show();
-      if (Platform.isWindows) await attachToWindowsTaskbar();
+      if (Platform.isWindows) unawaited(attachToWindowsTaskbar());
     },
   );
 }

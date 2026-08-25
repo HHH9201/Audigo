@@ -761,7 +761,7 @@ func (l *LoginService) ClaimDailyVip() LoginResponse {
 // GenerateQRKey 生成二维码登录Key
 func (l *LoginService) GenerateQRKey() QRKeyResponse {
 	// 构建请求URL，添加时间戳防止缓存
-	requestURL := fmt.Sprintf("%s/login/qr/key?platform=lite&timestamp=%d", baseApi, time.Now().UnixMilli())
+	requestURL := fmt.Sprintf("%s/login/qr/key?platform=pc&timestamp=%d", baseApi, time.Now().UnixMilli())
 
 	// 创建HTTP客户端，设置超时
 	client := &http.Client{
@@ -864,7 +864,7 @@ func (l *LoginService) CreateQRCode(key string) QRCodeResponse {
 	}
 
 	// 构建请求URL，添加时间戳防止缓存
-	requestURL := fmt.Sprintf("%s/login/qr/create?key=%s&qrimg=true&platform=lite&timestamp=%d",
+	requestURL := fmt.Sprintf("%s/login/qr/create?key=%s&qrimg=true&platform=pc&timestamp=%d",
 		baseApi, url.QueryEscape(key), time.Now().UnixMilli())
 
 	// 创建HTTP客户端，设置超时
@@ -959,7 +959,7 @@ func (l *LoginService) CheckQRStatus(key string) QRStatusResponse {
 	}
 
 	// 构建请求URL，添加时间戳防止缓存
-	requestURL := fmt.Sprintf("%s/login/qr/check?key=%s&platform=lite&timestamp=%d",
+	requestURL := fmt.Sprintf("%s/login/qr/check?key=%s&platform=pc&timestamp=%d",
 		baseApi, url.QueryEscape(key), time.Now().UnixMilli())
 
 	// 创建HTTP客户端，设置超时

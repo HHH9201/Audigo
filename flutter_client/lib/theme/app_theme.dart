@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum AppThemeMode { light, dark, frosted, frostedDark }
+enum AppThemeMode { system, light, dark, frosted, frostedDark }
 
 class AppTheme {
   static _ThemePalette _palette = _ThemePalette.light;
@@ -19,24 +19,45 @@ class AppTheme {
     _palette = _paletteFor(mode);
   }
 
-  static _ThemePalette _paletteFor(AppThemeMode mode) => switch (mode) {
-        AppThemeMode.light => _ThemePalette.light,
-        AppThemeMode.dark => _ThemePalette.dark,
-        AppThemeMode.frosted => _ThemePalette.frosted,
-        AppThemeMode.frostedDark => _ThemePalette.frostedDark,
-      };
+  /// 将“跟随系统”解析为具体明暗主题。
+  static AppThemeMode resolveSystem(AppThemeMode mode, Brightness brightness) {
+    if (mode != AppThemeMode.system) return mode;
+    return brightness == Brightness.dark
+        ? AppThemeMode.dark
+        : AppThemeMode.light;
+  }
 
-  static ThemeData themeFor(AppThemeMode mode) {
-    final palette = _paletteFor(mode);
-    final brightness = palette.isDark ? Brightness.dark : Brightness.light;
+  static _ThemePalette _paletteFor(AppThemeMode mode,
+      {Brightness brightness = Brightness.light}) {
+    final resolved = resolveSystem(mode, brightness);
+    return switch (resolved) {
+      AppThemeMode.light => _ThemePalette.light,
+      AppThemeMode.dark => _ThemePalette.dark,
+      AppThemeMode.frosted => _ThemePalette.frosted,
+      AppThemeMode.frostedDark => _ThemePalette.frostedDark,
+      AppThemeMode.system =>
+        brightness == Brightness.dark
+            ? _ThemePalette.dark
+            : _ThemePalette.light,
+    };
+  }
+
+  static ThemeData themeFor(AppThemeMode mode,
+      {Brightness brightness = Brightness.light}) {
+    final palette = _paletteFor(mode, brightness: brightness);
+    final resolved = resolveSystem(mode, brightness);
+    final effectiveBrightness =
+        resolved == AppThemeMode.dark || resolved == AppThemeMode.frostedDark
+            ? Brightness.dark
+            : Brightness.light;
     return ThemeData(
       useMaterial3: true,
-      brightness: brightness,
+      brightness: effectiveBrightness,
       scaffoldBackgroundColor: palette.background,
       primaryColor: palette.accent,
       colorScheme: ColorScheme.fromSeed(
         seedColor: palette.accent,
-        brightness: brightness,
+        brightness: effectiveBrightness,
         primary: palette.accent,
         surface: palette.surface,
         onSurface: palette.textPrimary,
@@ -47,7 +68,7 @@ class AppTheme {
         'PingFang SC',
         'sans-serif',
       ],
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: palette.surface,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -56,7 +77,7 @@ class AppTheme {
         ),
       ),
       dividerColor: palette.border,
-      dialogTheme: DialogTheme(backgroundColor: palette.surface),
+      dialogTheme: DialogThemeData(backgroundColor: palette.surface),
       inputDecorationTheme:
           InputDecorationTheme(fillColor: palette.surfaceVariant),
     );

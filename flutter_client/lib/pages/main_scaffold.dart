@@ -154,8 +154,6 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   @override
   Widget build(BuildContext context) {
-    final player = context.watch<AudioPlayerManager>();
-
     return Scaffold(
       backgroundColor: AppTheme.bgWarm,
       body: Column(
@@ -174,9 +172,19 @@ class _MainScaffoldState extends State<MainScaffold> {
                     child: _buildCurrentPage(),
                   ),
                 ),
-                if (_showRightSidebar &&
-                    (_rightSidebarTab == 0 || player.showLyrics))
-                  _buildRightSidebar(context, player),
+                if (_showRightSidebar)
+                  Selector<AudioPlayerManager, bool>(
+                    selector: (_, player) => player.showLyrics,
+                    builder: (context, showLyrics, _) {
+                      if (_rightSidebarTab == 1 && !showLyrics) {
+                        return const SizedBox.shrink();
+                      }
+                      return Consumer<AudioPlayerManager>(
+                        builder: (context, player, _) =>
+                            _buildRightSidebar(context, player),
+                      );
+                    },
+                  ),
               ],
             ),
           ),

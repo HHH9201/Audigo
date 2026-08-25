@@ -49,3 +49,7 @@ require (
 	golang.org/x/text v0.33.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
+
+// 本地补丁：修复 go-webview2 在窗口聚焦时 MoveFocus 瞬时失败会调用 os.Exit(1)
+// 导致整个应用启动即崩溃的问题（详见 third_party/go-webview2/pkg/edge/chromium.go）
+replace github.com/wailsapp/go-webview2 => ./third_party/go-webview2

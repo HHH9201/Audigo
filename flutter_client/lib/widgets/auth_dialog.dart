@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/music_api_service.dart';
 import '../theme/app_theme.dart';
 
@@ -56,8 +57,26 @@ class _AuthDialogState extends State<AuthDialog> {
     super.dispose();
   }
 
+  // 登录方式文本（对应 Go 版 saveLoginMethodToFile / readLoginMethodFromFile）
+  String _loginMethodText() {
+    var method = 'unknown';
+    final cached = _prefsCache;
+    if (cached != null) {
+      method = cached.getString('login_method') ?? 'unknown';
+    }
+    return switch (method) {
+      'phone' => '手机号登录',
+      'qrcode' => '扫码登录',
+      _ => '在线云认证',
+    };
+  }
+
+  static SharedPreferences? _prefsCache;
+
   Future<void> _checkLoginStatus() async {
     setState(() => _isLoading = true);
+    final prefs = await SharedPreferences.getInstance();
+    _prefsCache = prefs;
     final userRes = await MusicApiService.getUserDetail();
     if (userRes['success'] == true && userRes['data'] != null) {
       final vipRes = await MusicApiService.getVipDetail();
@@ -79,6 +98,17 @@ class _AuthDialogState extends State<AuthDialog> {
         });
       }
     }
+  }
+
+  // 后台异步补充 VIP 详情（失败不影响登录态展示）
+  Future<void> _refreshVipDetail() async {
+    try {
+      final vipRes = await MusicApiService.getVipDetail();
+      if (!mounted) return;
+      if (vipRes['success'] == true && vipRes['data'] != null) {
+        setState(() => _vipData = vipRes['data']);
+      }
+    } catch (_) {}
   }
 
   // 发送验证码
@@ -123,9 +153,22 @@ class _AuthDialogState extends State<AuthDialog> {
     setState(() => _isSubmitting = false);
 
     if (res['success'] == true) {
+      // 与原版 Go 版 loginSuccess 一致：直接使用登录响应的用户信息更新界面，
+      // 不依赖 getUserDetail 二次校验。
+      final data = res['data'];
+      final userData = data is Map
+          ? Map<String, dynamic>.from(data)
+          : <String, dynamic>{};
+      setState(() {
+        _isLoggedIn = true;
+        _isLoading = false;
+        _userData = userData;
+        _vipData = null;
+      });
       _showToast("登录成功！");
       widget.onLoginChanged();
-      _checkLoginStatus();
+      // 后台异步补充 VIP 详情（失败不影响登录态展示）。
+      unawaited(_refreshVipDetail());
     } else {
       _showToast(res['message'] ?? "登录失败，请检查验证码");
     }
@@ -199,12 +242,22 @@ class _AuthDialogState extends State<AuthDialog> {
         if (!mounted) return;
         _qrLog('UI 收到二维码状态: $status');
         if (status == 4) {
-          _qrLog('UI 确认扫码成功，停止轮询并刷新用户信息');
+          _qrLog('UI 确认扫码成功，停止轮询并切换到用户信息');
           timer.cancel();
-          setState(() => _qrStatusMsg = '登录成功，正在读取账号信息...');
+          _qrPollingTimer = null;
+          // 与原版 Go 版 loginSuccess 一致：直接使用扫码响应中的
+          // nickname/pic/userid 更新界面，不依赖 getUserDetail 二次校验。
+          final userData = Map<String, dynamic>.from(data as Map);
+          setState(() {
+            _isLoggedIn = true;
+            _isLoading = false;
+            _userData = userData;
+            _vipData = null;
+          });
           _showToast('扫码登录成功！');
           widget.onLoginChanged();
-          await _checkLoginStatus();
+          // 后台异步补充 VIP 详情（失败不影响登录态展示）。
+          unawaited(_refreshVipDetail());
         } else if (status == 0) {
           timer.cancel();
           setState(() => _qrStatusMsg = '二维码已过期，点击刷新');
@@ -298,6 +351,20 @@ class _AuthDialogState extends State<AuthDialog> {
     final isVip =
         (_userData?['vip_type'] ?? 0) > 0 || (_vipData?['is_vip'] ?? 0) == 1;
     final vipEndTime = _vipData?['vip_end_time'] ?? '-';
+    final vipType = _vipData?['product_type'] ?? '-';
+    // 登录时间（秒时间戳），对应 Go 版 userInfo.userData.login_time
+    final loginTimeRaw = _userData?['login_time'];
+    final loginTime = loginTimeRaw is num && loginTimeRaw > 0
+        ? DateTime.fromMillisecondsSinceEpoch(loginTimeRaw.toInt() * 1000)
+        : null;
+    final loginTimeText = loginTime == null
+        ? '-'
+        : '${loginTime.year}-${loginTime.month.toString().padLeft(2, '0')}-'
+            '${loginTime.day.toString().padLeft(2, '0')} '
+            '${loginTime.hour.toString().padLeft(2, '0')}:'
+            '${loginTime.minute.toString().padLeft(2, '0')}';
+    // 登录方式（对应 Go 版 saveLoginMethodToFile / readLoginMethodFromFile）
+    final loginMethod = _loginMethodText();
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -411,10 +478,14 @@ class _AuthDialogState extends State<AuthDialog> {
         const Divider(height: 1),
         const SizedBox(height: 16),
 
-        // 用户详细列表项
+        // 用户详细列表项（与原版 Go 用户信息弹窗一致）
         _detailRow("用户 ID", "$userid"),
-        _detailRow("登录方式", "在线云认证"),
-        if (isVip) _detailRow("VIP 到期时间", vipEndTime),
+        _detailRow("登录方式", loginMethod),
+        _detailRow("登录时间", loginTimeText),
+        if (isVip) ...[
+          _detailRow("VIP类型", vipType),
+          _detailRow("VIP 到期时间", vipEndTime),
+        ],
 
         const SizedBox(height: 24),
         Row(

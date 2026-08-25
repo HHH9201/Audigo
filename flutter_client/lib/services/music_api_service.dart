@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -43,14 +44,39 @@ class LyricsContent {
 }
 
 class MusicApiService {
-  // 主接口与多备用镜像节点列表
+  // 主接口与多备用镜像节点列表（第一个为主接口，与原版 Go config.go 一致）
   static const List<String> apiMirrors = [
-    "https://ku-gou-music-api-beige.vercel.app",
+    "https://localhost:40000",
   ];
   static String baseApi = apiMirrors.first;
+
+  // 云网关鉴权 token（与原版 Go config.go 的 apiToken 一致）
+  static const String apiToken =
+      "768b27f839b768c39fa3c23b9f6c5a8c620763bb322968a589ced243f7e1803b";
+
   static final Dio _dio = _createDio();
   static DateTime? _lastVipClaim;
   static Future<void>? _vipClaimRequest;
+
+  /// 是否为发往云网关（baseApi）的请求。
+  static bool _isGatewayRequest(String url) =>
+      url.startsWith(apiMirrors.first);
+
+  static bool _isRetryableNetworkError(DioException error) {
+    if (error.response?.statusCode case final status? when status >= 500) {
+      return true;
+    }
+    return switch (error.type) {
+      DioExceptionType.connectionTimeout ||
+      DioExceptionType.sendTimeout ||
+      DioExceptionType.receiveTimeout ||
+      DioExceptionType.connectionError =>
+        true,
+      DioExceptionType.unknown =>
+        error.error is HandshakeException || error.error is SocketException,
+      _ => false,
+    };
+  }
 
   static Dio _createDio() {
     final dio = Dio(BaseOptions(
@@ -72,6 +98,44 @@ class MusicApiService {
             (X509Certificate cert, String host, int port) => true;
         return client;
       },
+    );
+
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          // 发往云网关的请求自动附加鉴权头（与原版 Go roundTripFunc 一致）
+          if (_isGatewayRequest(options.uri.toString())) {
+            options.headers['Authorization'] = 'Bearer $apiToken';
+          }
+          handler.next(options);
+        },
+        onResponse: (response, handler) {
+          // 服务端每个请求都会下发整套设备 Cookie，后台异步合并保存，
+          // 保证后续请求回传完整 Cookie（token 与设备参数绑定）。
+          if (_isGatewayRequest(response.requestOptions.uri.toString())) {
+            unawaited(_mergeDeviceCookies(response));
+          }
+          handler.next(response);
+        },
+        onError: (error, handler) async {
+          final request = error.requestOptions;
+          final retryCount = request.extra['retryCount'] as int? ?? 0;
+          if (request.method.toUpperCase() != 'GET' ||
+              retryCount >= 1 ||
+              !_isRetryableNetworkError(error)) {
+            handler.next(error);
+            return;
+          }
+
+          request.extra['retryCount'] = retryCount + 1;
+          await Future<void>.delayed(const Duration(milliseconds: 600));
+          try {
+            handler.resolve(await dio.fetch<dynamic>(request));
+          } on DioException catch (retryError) {
+            handler.next(retryError);
+          }
+        },
+      ),
     );
 
     return dio;
@@ -102,6 +166,62 @@ class MusicApiService {
     }
 
     return '';
+  }
+
+  /// 从响应头 Set-Cookie 中提取设备参数（KUGOU_API_*、dfid）并合并进
+  /// 本地保存的 Cookie。对应 KuGouMusicApi 服务端下发的整套设备标识：
+  /// KUGOU_API_MID/GUID/DEV/MAC/WEBGL + dfid。
+  ///
+  /// 若不保存并回传这些设备参数，酷狗会因 token 与设备不匹配返回
+  /// 20017/20018（HTTP 502）。
+  static Future<void> _mergeDeviceCookies(Response<dynamic> response) async {
+    try {
+      final setCookies = response.headers['set-cookie'];
+      if (setCookies == null || setCookies.isEmpty) return;
+      final deviceKeys = const {
+        'KUGOU_API_PLATFORM',
+        'KUGOU_API_MID',
+        'KUGOU_API_GUID',
+        'KUGOU_API_DEV',
+        'KUGOU_API_MAC',
+        'KUGOU_API_WEBGL',
+        'dfid',
+      };
+      final deviceParts = <String>[];
+      for (final cookieHeader in setCookies) {
+        final firstSegment = cookieHeader.split(';').first.trim();
+        final eq = firstSegment.indexOf('=');
+        if (eq <= 0) continue;
+        final key = firstSegment.substring(0, eq).trim();
+        final value = firstSegment.substring(eq + 1).trim();
+        if (deviceKeys.contains(key) && value.isNotEmpty) {
+          deviceParts.add('$key=$value');
+        }
+      }
+      if (deviceParts.isEmpty) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      final current = prefs.getString('user_cookie') ?? '';
+      final existingParts = current.split(';').map((p) => p.trim()).where((p) => p.isNotEmpty).toList();
+      final existingKeys =
+          existingParts.map((p) => p.split('=').first.trim()).toSet();
+      for (final part in deviceParts) {
+        final key = part.split('=').first.trim();
+        if (existingKeys.contains(key)) {
+          // 更新已有的设备参数值
+          final idx = existingParts.indexWhere(
+              (p) => p.split('=').first.trim() == key);
+          existingParts[idx] = part;
+        } else {
+          existingParts.add(part);
+        }
+      }
+      final merged = existingParts.join(';');
+      await prefs.setString('user_cookie', merged);
+      _qrLog('设备 Cookie 已合并: ${merged.length} 字符');
+    } catch (e) {
+      _qrLog('合并设备 Cookie 失败: $e');
+    }
   }
 
   // 1. 获取每日推荐歌曲
@@ -137,11 +257,16 @@ class MusicApiService {
   }
 
   // 2. 获取私人 FM (支持模式 normal/small/peak 与 AI pool)
+  // 对应原版 Go 的 GetPersonalFM / GetPersonalFMSimple / GetPersonalFMWithParams
+  // / GetPersonalFMAdvanced（isOverplay/remainSongCnt/playTime 高级参数）。
   static Future<List<Song>> getPersonalFM({
     String mode = 'normal',
     int songPoolId = 0,
     String hash = '',
     String songId = '',
+    int playTime = 0,
+    bool isOverplay = false,
+    int remainSongCnt = 0,
   }) async {
     try {
       final cookie = await _getCookie();
@@ -153,6 +278,9 @@ class MusicApiService {
       if (hash.isNotEmpty) queryParams['hash'] = hash;
       if (songId.isNotEmpty) queryParams['songid'] = songId;
       if (songPoolId > 0) queryParams['song_pool_id'] = songPoolId;
+      if (playTime > 0) queryParams['playtime'] = playTime;
+      if (isOverplay) queryParams['is_overplay'] = 1;
+      if (remainSongCnt > 0) queryParams['remain_song_cnt'] = remainSongCnt;
 
       final response =
           await _dio.get('$baseApi/personal/fm', queryParameters: queryParams);
@@ -505,6 +633,15 @@ class MusicApiService {
 
   // 7. 获取新碟上架
   static Future<List<Map<String, dynamic>>> getNewAlbums() async {
+    final categories = await getNewAlbumsByCategory();
+    return [
+      for (final category in categories.values) ...category,
+    ];
+  }
+
+  /// 获取新碟上架并按分类（chn 华语/eur 欧美/jpn 日韩/kor 韩国）返回，
+  /// 对应原版 Go 的 [DiscoverService.GetNewAlbumsByCategory]。
+  static Future<Map<String, List<Map<String, dynamic>>>> getNewAlbumsByCategory() async {
     try {
       final cookie = await _getCookie();
       final response = await _dio.get(
@@ -513,11 +650,11 @@ class MusicApiService {
       );
       final data = response.data?['data'];
       if (response.data?['status'] == 1 && data is Map) {
-        final albums = <Map<String, dynamic>>[];
+        final result = <String, List<Map<String, dynamic>>>{};
         for (final category in ['chn', 'eur', 'jpn', 'kor']) {
           final categoryAlbums = data[category];
           if (categoryAlbums is! List) continue;
-          albums.addAll(categoryAlbums.whereType<Map>().map((item) {
+          result[category] = categoryAlbums.whereType<Map>().map((item) {
             final album = Map<String, dynamic>.from(item);
             final cover = album['imgurl']?.toString() ?? '';
             final publishTime = album['publishtime']?.toString() ?? '';
@@ -535,14 +672,14 @@ class MusicApiService {
                   ),
               'description': album['intro']?.toString() ?? '',
             };
-          }));
+          }).toList();
         }
-        return albums;
+        return result;
       }
     } catch (e) {
-      print('获取新碟上架失败: $e');
+      print('获取新碟上架分类失败: $e');
     }
-    return [];
+    return const {};
   }
 
   // 8. 解析真实播放地址，兼容 Go 服务和上游接口的不同响应结构。
@@ -600,6 +737,8 @@ class MusicApiService {
               ? cookie
               : '$cookie;KUGOU_API_PLATFORM=lite',
         });
+        print(
+            '播放调试: /song/url 响应 status=${response.statusCode} data=${response.data}');
         final urls = _extractPlayUrls(response.data);
         if (urls.isNotEmpty) return urls;
         print('歌曲播放地址为空: hash=$hash quality=$requestedQuality '
@@ -826,6 +965,36 @@ class MusicApiService {
     }
   }
 
+  /// 为 AI 推荐获取我喜欢的歌曲（更大的 pagesize），
+  /// 对应原版 Go 的 [FavoritesService.GetFavoriteSongsForAI]。
+  static Future<List<Song>> getFavoriteSongsForAI(
+    String globalCollectionId,
+  ) async {
+    if (globalCollectionId.trim().isEmpty) return [];
+    try {
+      final cookie = await _getCookie();
+      if (cookie.isEmpty) return [];
+      final response = await _dio.get(
+        '$baseApi/playlist/track/all',
+        queryParameters: {
+          'id': globalCollectionId,
+          'pagesize': 150,
+          'cookie': cookie,
+        },
+      );
+      final data = response.data?['data'];
+      final list = data is Map ? (data['info'] ?? data['songs'] ?? []) : [];
+      if (list is! List) return [];
+      return list
+          .whereType<Map>()
+          .map((item) => Song.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+    } catch (e) {
+      print('获取AI推荐收藏歌曲失败 ($globalCollectionId): $e');
+      return [];
+    }
+  }
+
   // 9. 添加播放历史
   static Future<bool> addPlayHistory(Song song) async {
     if (song.hash.isEmpty) return false;
@@ -1042,11 +1211,25 @@ class MusicApiService {
       }
     }
     final documents = await getApplicationDocumentsDirectory();
-    final directory = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: '选择歌曲保存目录',
-      initialDirectory: documents.path,
-    );
-    if (directory == null || directory.isEmpty) return null;
+    // 优先使用设置中保存的自定义下载路径（对应原版 Go 的 downloadPath 设置）。
+    var directory = prefs.getString('download_path')?.trim();
+    if (directory == null || directory.isEmpty) {
+      directory = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: '选择歌曲保存目录',
+        initialDirectory: documents.path,
+      );
+      if (directory == null || directory.isEmpty) return null;
+      await prefs.setString('download_path', directory);
+    }
+    final downloadDirectory = Directory(directory);
+    if (!await downloadDirectory.exists()) {
+      try {
+        await downloadDirectory.create(recursive: true);
+      } catch (_) {
+        directory = null;
+      }
+    }
+    if (directory == null) return null;
 
     final playUrl = await getPlayUrl(song.hash, quality: effectiveQuality);
     if (playUrl == null || playUrl.isEmpty) return null;
@@ -1246,6 +1429,9 @@ class MusicApiService {
         await prefs.setString('user_cookie', cookie);
         await prefs.setString('user_token', token.toString());
         await prefs.setInt('user_id', int.tryParse(userid.toString()) ?? 0);
+        await prefs.setString('login_method', 'phone');
+        // 合并服务端下发的整套设备 Cookie，后续请求回传完整 Cookie。
+        await _mergeDeviceCookies(response);
         return {'success': true, 'data': response.data['data']};
       }
       return {'success': false, 'message': response.data?['message'] ?? '登录失败'};
@@ -1259,7 +1445,7 @@ class MusicApiService {
     try {
       final response =
           await _dio.get('$baseApi/login/qr/key', queryParameters: {
-        'platform': 'lite',
+        'platform': 'pc',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
       _qrLog('二维码 Key 响应: ${_qrSummary(response.data)}');
@@ -1277,7 +1463,7 @@ class MusicApiService {
           await _dio.get('$baseApi/login/qr/create', queryParameters: {
         'key': key,
         'qrimg': 'true',
-        'platform': 'lite',
+        'platform': 'pc',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
       final data = response.data is Map ? response.data['data'] : null;
@@ -1297,7 +1483,7 @@ class MusicApiService {
       final response =
           await _dio.get('$baseApi/login/qr/check', queryParameters: {
         'key': key,
-        'platform': 'lite',
+        'platform': 'pc',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
       final payload = response.data;
@@ -1317,7 +1503,12 @@ class MusicApiService {
             await prefs.setString('user_cookie', cookie);
             await prefs.setString('user_token', token);
             await prefs.setInt('user_id', userid);
+            await prefs.setString('login_method', 'qrcode');
             _qrLog('扫码登录 Cookie 已保存，长度=${cookie.length}');
+            // 合并服务端下发的整套设备 Cookie（KUGOU_API_*、dfid），
+            // 后续请求回传完整 Cookie 才能通过酷狗设备校验。
+            await _mergeDeviceCookies(response);
+            _qrLog('扫码登录完成，合并设备 Cookie 后 user_cookie 已更新');
           } else {
             _qrLog('扫码成功但缺少 token 或 userid，未保存登录状态');
           }

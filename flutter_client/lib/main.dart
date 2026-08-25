@@ -1,8 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
-import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +11,7 @@ import 'services/audio_player_manager.dart';
 import 'services/desktop_lifecycle_manager.dart';
 import 'services/desktop_lyrics_manager.dart';
 import 'services/desktop_media_key_manager.dart';
+import 'services/mpris_service.dart';
 import 'services/music_audio_handler.dart';
 import 'pages/main_scaffold.dart';
 import 'theme/theme_controller.dart';
@@ -18,7 +19,6 @@ import 'widgets/desktop_lyrics_window.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  JustAudioMediaKit.ensureInitialized();
   if (DesktopLifecycleManager.isSupported) {
     final controller = await WindowController.fromCurrentEngine();
     if (controller.arguments == DesktopLyricsManager.windowArgument) {
@@ -51,20 +51,10 @@ Future<void> main(List<String> args) async {
 
   final themeController = await ThemeController.load();
   final audioPlayerManager = AudioPlayerManager();
-  await DesktopLifecycleManager.instance.initialize(audioPlayerManager);
-  await DesktopLyricsManager.instance.initialize(audioPlayerManager);
-  await DesktopMediaKeyManager.instance.initialize(audioPlayerManager);
-  if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
-    await AudioService.init(
-      builder: () => MusicAudioHandler(audioPlayerManager),
-      config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.hjh.musichub.playback',
-        androidNotificationChannelName: '音乐播放',
-        androidNotificationOngoing: true,
-      ),
-    );
-  }
 
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(_initializeDeferredServices(audioPlayerManager));
+  });
   runApp(
     MultiProvider(
       providers: [
@@ -74,6 +64,41 @@ Future<void> main(List<String> args) async {
       child: const MusicHubApp(),
     ),
   );
+}
+
+Future<void> _initializeDeferredServices(
+  AudioPlayerManager audioPlayerManager,
+) async {
+  final initializations = <Future<void>>[
+    DesktopLifecycleManager.instance.initialize(audioPlayerManager),
+    DesktopLyricsManager.instance.initialize(audioPlayerManager),
+    DesktopMediaKeyManager.instance.initialize(audioPlayerManager),
+    MprisService.instance.initialize(audioPlayerManager),
+  ];
+  if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
+    initializations.add(
+      AudioService.init(
+        builder: () => MusicAudioHandler(audioPlayerManager),
+        config: const AudioServiceConfig(
+          androidNotificationChannelId: 'com.hjh.musichub.playback',
+          androidNotificationChannelName: '音乐播放',
+          androidNotificationOngoing: true,
+        ),
+      ).then<void>((_) {}),
+    );
+  }
+
+  try {
+    await Future.wait(initializations);
+  } catch (error, stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        context: ErrorDescription('初始化非首帧服务时'),
+      ),
+    );
+  }
 }
 
 class MusicHubApp extends StatelessWidget {

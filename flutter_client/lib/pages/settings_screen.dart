@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -30,6 +32,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'show_lyrics': true,
     'taskbar_lyrics': true,
     'download_lyrics': true,
+    'download_path': '',
+    'lyrics_font_size': 22,
+    'lyrics_offset_x': 0,
+    'lyrics_offset_y': 0,
     'save_history': true,
     'analytics_enabled': true,
     'start_minimized': false,
@@ -45,6 +51,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _showLyrics = true;
   bool _taskbarLyrics = true;
   bool _downloadLyrics = true;
+  String _downloadPath = '';
+  int _lyricsFontSize = 22;
+  int _lyricsOffsetX = 0;
+  int _lyricsOffsetY = 0;
   bool _saveHistory = true;
   bool _analytics = true;
   bool _startMinimized = false;
@@ -68,6 +78,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _showLyrics = prefs.getBool('show_lyrics') ?? true;
       _taskbarLyrics = prefs.getBool('taskbar_lyrics') ?? true;
       _downloadLyrics = prefs.getBool('download_lyrics') ?? true;
+      _downloadPath = prefs.getString('download_path') ?? '';
+      _lyricsFontSize = prefs.getInt('lyrics_font_size') ?? 22;
+      _lyricsOffsetX = prefs.getInt('lyrics_offset_x') ?? 0;
+      _lyricsOffsetY = prefs.getInt('lyrics_offset_y') ?? 0;
       _saveHistory = prefs.getBool('save_history') ?? true;
       _analytics = prefs.getBool('analytics_enabled') ?? true;
       _startMinimized = prefs.getBool('start_minimized') ?? false;
@@ -82,6 +96,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveBool(String key, bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(key, value);
+  }
+
+  Future<void> _saveInt(String key, int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(key, value);
+  }
+
+  Future<void> _pickDownloadPath() async {
+    final path = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: '选择下载目录',
+    );
+    if (path == null || path.isEmpty) return;
+    final directoryExists = await Directory(path).exists();
+    if (!directoryExists) {
+      _showMessage('文件夹不存在，请重新选择');
+      return;
+    }
+    await _saveString('download_path', path);
+    if (!mounted) return;
+    setState(() => _downloadPath = path);
+    _showMessage('下载路径已更新');
   }
 
   Future<void> _saveQuality(String quality) async {
@@ -234,6 +269,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// 返回本机设置文件（SharedPreferences）的存储路径，对应原版 Go 的
+  /// `GetSettingsPath` 与设置页"设置文件位置"显示。
+  Future<String> _settingsFilePath() async {
+    try {
+      final support = await getApplicationSupportDirectory();
+      return p.join(support.path, 'shared_preferences.json');
+    } catch (_) {
+      return '';
+    }
+  }
+
   Widget _section(String title, List<Widget> children) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -344,6 +390,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 decoration: const InputDecoration(labelText: '界面主题'),
                 items: const [
                   DropdownMenuItem(
+                      value: AppThemeMode.system, child: Text('跟随系统')),
+                  DropdownMenuItem(
                       value: AppThemeMode.light, child: Text('浅色')),
                   DropdownMenuItem(value: AppThemeMode.dark, child: Text('深色')),
                   DropdownMenuItem(
@@ -367,7 +415,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   () => _showLyrics = value,
                 ),
               ),
-              if (DesktopLyricsManager.isSupported)
+              if (DesktopLyricsManager.isSupported) ...[
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('桌面歌词'),
@@ -379,6 +427,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (mounted) setState(() => _taskbarLyrics = value);
                   },
                 ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('歌词文字大小'),
+                  subtitle: Slider(
+                    value: _lyricsFontSize.toDouble(),
+                    min: 12,
+                    max: 48,
+                    divisions: 36,
+                    label: '$_lyricsFontSize',
+                    onChanged: (value) async {
+                      final size = value.round();
+                      setState(() => _lyricsFontSize = size);
+                      await _saveInt('lyrics_font_size', size);
+                      await DesktopLyricsManager.instance
+                          .reloadLyricsWindow();
+                    },
+                  ),
+                  trailing: Text('$_lyricsFontSize'),
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('桌面歌词水平位置'),
+                  subtitle: Slider(
+                    value: _lyricsOffsetX.toDouble(),
+                    min: -300,
+                    max: 300,
+                    divisions: 120,
+                    label: '$_lyricsOffsetX',
+                    onChanged: (value) async {
+                      final offset = value.round();
+                      setState(() => _lyricsOffsetX = offset);
+                      await _saveInt('lyrics_offset_x', offset);
+                      await DesktopLyricsManager.instance
+                          .reloadLyricsWindow();
+                    },
+                  ),
+                  trailing: Text('$_lyricsOffsetX'),
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('桌面歌词垂直位置'),
+                  subtitle: Slider(
+                    value: _lyricsOffsetY.toDouble(),
+                    min: -60,
+                    max: 60,
+                    divisions: 24,
+                    label: '$_lyricsOffsetY',
+                    onChanged: (value) async {
+                      final offset = value.round();
+                      setState(() => _lyricsOffsetY = offset);
+                      await _saveInt('lyrics_offset_y', offset);
+                      await DesktopLyricsManager.instance
+                          .reloadLyricsWindow();
+                    },
+                  ),
+                  trailing: Text('$_lyricsOffsetY'),
+                ),
+              ],
             ]),
             _section('下载设置', [
               SwitchListTile(
@@ -389,6 +495,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   await _saveBool('download_lyrics', value);
                   if (mounted) setState(() => _downloadLyrics = value);
                 },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('下载路径'),
+                subtitle: Text(
+                  _downloadPath.isEmpty ? '默认：每次下载时选择' : _downloadPath,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: OutlinedButton(
+                  onPressed: _pickDownloadPath,
+                  child: const Text('选择文件夹'),
+                ),
               ),
             ]),
             _section('应用行为', [
@@ -454,6 +573,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     label: const Text('重置'),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              FutureBuilder<String>(
+                future: _settingsFilePath(),
+                builder: (context, snapshot) {
+                  final path = snapshot.data ?? '';
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '设置文件位置',
+                        style: TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        path.isEmpty ? '加载中...' : path,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey,
+                          wordSpacing: 1,
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ]),
             _section('关于 MusicHub', const [

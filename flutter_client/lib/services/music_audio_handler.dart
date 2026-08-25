@@ -14,13 +14,26 @@ class MusicAudioHandler extends BaseAudioHandler
   }
 
   final AudioPlayerManager _manager;
+  String? _queueSignature;
+  String? _mediaItemSignature;
 
   void _syncState() {
-    final items = _manager.playlist.map(_toMediaItem).toList(growable: false);
-    queue.add(items);
+    final queueSignature = _manager.playlist
+        .map((song) => _songSignature(song, includeCurrentDuration: true))
+        .join('\u0000');
+    if (queueSignature != _queueSignature) {
+      _queueSignature = queueSignature;
+      queue.add(_manager.playlist.map(_toMediaItem).toList(growable: false));
+    }
 
     final current = _manager.currentSong;
-    mediaItem.add(current == null ? null : _toMediaItem(current));
+    final mediaItemSignature = current == null
+        ? ''
+        : _songSignature(current, includeCurrentDuration: true);
+    if (mediaItemSignature != _mediaItemSignature) {
+      _mediaItemSignature = mediaItemSignature;
+      mediaItem.add(current == null ? null : _toMediaItem(current));
+    }
 
     playbackState.add(
       playbackState.value.copyWith(
@@ -43,6 +56,20 @@ class MusicAudioHandler extends BaseAudioHandler
         queueIndex: _manager.currentIndex >= 0 ? _manager.currentIndex : null,
       ),
     );
+  }
+
+  String _songSignature(
+    Song song, {
+    required bool includeCurrentDuration,
+  }) {
+    final isCurrent = song.hash == _manager.currentSong?.hash;
+    final duration = includeCurrentDuration &&
+            isCurrent &&
+            _manager.totalDuration > Duration.zero
+        ? _manager.totalDuration.inMilliseconds
+        : song.timeLength * 1000;
+    return '${song.hash}\u0001${song.songName}\u0001${song.authorName}'
+        '\u0001${song.albumName}\u0001${song.coverUrl}\u0001$duration';
   }
 
   MediaItem _toMediaItem(Song song) {

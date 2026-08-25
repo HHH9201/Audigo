@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 import 'audio_player_manager.dart';
 import 'desktop_lyrics_manager.dart';
 import 'desktop_media_key_manager.dart';
+import 'mpris_service.dart';
 
 class DesktopLifecycleManager with WindowListener, TrayListener {
   DesktopLifecycleManager._();
@@ -80,6 +81,7 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
     await _player?.stop();
     await DesktopMediaKeyManager.instance.dispose();
     await DesktopLyricsManager.instance.close();
+    await MprisService.instance.dispose();
     await trayManager.destroy();
     await windowManager.setPreventClose(false);
     await windowManager.destroy();
@@ -156,6 +158,13 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
             label: '下一首',
             disabled: song == null,
           ),
+          MenuItem(
+            key: 'favorite',
+            label: song != null && player.isFavorite(song.hash)
+                ? '♥ 取消喜欢'
+                : '♥ 喜欢当前歌曲',
+            disabled: song == null,
+          ),
           MenuItem.separator(),
           MenuItem(
             key: 'desktop_lyrics',
@@ -192,6 +201,12 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
         _player?.togglePlay();
       case 'next':
         _player?.playNext();
+      case 'favorite':
+        final song = _player?.currentSong;
+        if (song != null) {
+          _player?.toggleFavorite(song.hash, song: song);
+        }
+        _updateTrayMenu(force: true);
       case 'desktop_lyrics':
         DesktopLyricsManager.instance
             .toggle()

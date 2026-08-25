@@ -39,6 +39,7 @@ class AudioPlayerManager extends ChangeNotifier {
   bool _showLyrics = true;
   int _playRequestId = 0;
   int? _preparingSourceIndex;
+  int _debugLastPositionReportMs = -1000;
   final List<int> _gaplessSongIndexes = [];
   ConcatenatingAudioSource? _gaplessSource;
 
@@ -47,6 +48,12 @@ class AudioPlayerManager extends ChangeNotifier {
   int _currentLyricIndex = 0;
   int _currentLyricWordIndex = -1;
   double _currentLyricWordProgress = 0;
+  List<LyricLine>? _indexedLyrics;
+  Duration _lastLyricPosition = Duration.zero;
+
+  Timer? _progressNotificationTimer;
+  DateTime _lastProgressNotification = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _volumePersistTimer;
 
   // 收藏歌曲哈希列表
   final Set<String> _favoriteHashes = {};
@@ -214,6 +221,27 @@ class AudioPlayerManager extends ChangeNotifier {
         : '128k';
   }
 
+  // #region debug-point progress-bar-stale:runtime-observation
+  void _reportProgressDebug(
+      String hypothesisId, String message, Map<String, dynamic> data) {
+    unawaited(HttpClient()
+        .postUrl(Uri.parse('http://127.0.0.1:7777/event'))
+        .then<void>((request) async {
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode({
+        'sessionId': 'progress-bar-stale',
+        'runId': 'pre-fix',
+        'hypothesisId': hypothesisId,
+        'location': 'audio_player_manager.dart',
+        'msg': '[DEBUG] $message',
+        'data': data,
+        'ts': DateTime.now().millisecondsSinceEpoch
+      }));
+      await request.close();
+    }, onError: (_, __) {}));
+  }
+  // #endregion
+
   void _initAudioListeners() {
     _player.setVolume(_volume);
 
@@ -221,6 +249,12 @@ class AudioPlayerManager extends ChangeNotifier {
     _player.playerStateStream.listen((state) {
       _isPlaying = state.playing;
       _processingState = state.processingState;
+      _reportProgressDebug('A', 'player state', {
+        'playing': state.playing,
+        'processingState': state.processingState.name,
+        'positionMs': _currentPosition.inMilliseconds,
+        'durationMs': _totalDuration.inMilliseconds
+      });
       if (state.processingState == ProcessingState.completed) {
         _handleTrackEnded();
       }
@@ -256,12 +290,22 @@ class AudioPlayerManager extends ChangeNotifier {
     _player.positionStream.listen((position) {
       _currentPosition = position;
       _updateLyricIndex(position);
-      notifyListeners();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _debugLastPositionReportMs >= 1000) {
+        _debugLastPositionReportMs = now;
+        _reportProgressDebug('A', 'position update', {
+          'positionMs': position.inMilliseconds,
+          'isPlaying': _isPlaying,
+          'processingState': _processingState.name,
+          'durationMs': _totalDuration.inMilliseconds
+        });
+      }
+      _scheduleProgressNotification();
     });
 
     _player.bufferedPositionStream.listen((position) {
       _bufferedPosition = position;
-      notifyListeners();
+      _scheduleProgressNotification();
     });
 
     // 监听歌曲总时长
@@ -273,34 +317,79 @@ class AudioPlayerManager extends ChangeNotifier {
     });
   }
 
+  void _scheduleProgressNotification() {
+    const interval = Duration(milliseconds: 100);
+    final elapsed = DateTime.now().difference(_lastProgressNotification);
+    if (elapsed >= interval) {
+      _progressNotificationTimer?.cancel();
+      _progressNotificationTimer = null;
+      _lastProgressNotification = DateTime.now();
+      notifyListeners();
+      return;
+    }
+    if (_progressNotificationTimer != null) return;
+    _progressNotificationTimer = Timer(interval - elapsed, () {
+      _progressNotificationTimer = null;
+      _lastProgressNotification = DateTime.now();
+      notifyListeners();
+    });
+  }
+
   void _updateLyricIndex(Duration position) {
     if (_currentLyrics.isEmpty) {
       _currentLyricIndex = 0;
       _currentLyricWordIndex = -1;
       _currentLyricWordProgress = 0;
+      _lastLyricPosition = position;
       return;
     }
-    int index = 0;
-    for (int i = 0; i < _currentLyrics.length; i++) {
-      if (position >= _currentLyrics[i].time) {
-        index = i;
-      } else {
-        break;
+
+    final lyricsChanged = !identical(_indexedLyrics, _currentLyrics);
+    if (lyricsChanged) _indexedLyrics = _currentLyrics;
+    var index = _currentLyricIndex.clamp(0, _currentLyrics.length - 1);
+    final movedForward = !lyricsChanged && position >= _lastLyricPosition;
+    if (movedForward && position >= _currentLyrics[index].time) {
+      while (index + 1 < _currentLyrics.length &&
+          position >= _currentLyrics[index + 1].time) {
+        index++;
       }
+    } else {
+      var low = 0;
+      var high = _currentLyrics.length;
+      while (low < high) {
+        final middle = low + ((high - low) >> 1);
+        if (_currentLyrics[middle].time <= position) {
+          low = middle + 1;
+        } else {
+          high = middle;
+        }
+      }
+      index = (low - 1).clamp(0, _currentLyrics.length - 1);
     }
     _currentLyricIndex = index;
+    _lastLyricPosition = position;
+
     final words = _currentLyrics[index].words;
-    _currentLyricWordIndex = -1;
+    var wordIndex = -1;
+    var low = 0;
+    var high = words.length;
+    while (low < high) {
+      final middle = low + ((high - low) >> 1);
+      if (words[middle].time <= position) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    wordIndex = low - 1;
+    _currentLyricWordIndex = wordIndex;
     _currentLyricWordProgress = 0;
-    for (var i = 0; i < words.length; i++) {
-      final word = words[i];
-      if (position < word.time) break;
-      _currentLyricWordIndex = i;
+    if (wordIndex >= 0) {
+      final word = words[wordIndex];
       final elapsed = position.inMilliseconds - word.time.inMilliseconds;
       _currentLyricWordProgress = word.duration.inMilliseconds <= 0
           ? 1
           : (elapsed / word.duration.inMilliseconds).clamp(0.0, 1.0);
-      if (position < word.time + word.duration) break;
     }
   }
 
@@ -335,6 +424,8 @@ class AudioPlayerManager extends ChangeNotifier {
   // 播放指定歌曲
   Future<void> playSong(Song song, {List<Song>? newPlaylist}) async {
     final requestId = ++_playRequestId;
+    // 确保平台播放器已初始化（解决首次 setAudioSource 卡死问题）
+    await _player.setVolume(_volume);
     if (newPlaylist != null) {
       _playlist = List.from(newPlaylist);
       _currentIndex = _playlist.indexWhere((s) => s.hash == song.hash);
@@ -410,12 +501,22 @@ class AudioPlayerManager extends ChangeNotifier {
       return;
     }
 
-    // 1. 获取在线音频地址并缓存到本地
+    // 1. 获取在线音频地址
     final quality = await _effectiveStreamingQuality();
-    final audioFile = await _cachedOnlineAudio(song, quality);
+    print('播放调试: 开始在线播放 ${song.songName} quality=$quality');
+    final urls = await MusicApiService.getPlayUrls(
+      song.hash,
+      songName: song.songName,
+      artist: song.authorName,
+      quality: quality,
+    );
+    print('播放调试: 获取到 ${urls.length} 个URL');
+    for (var i = 0; i < urls.length; i++) {
+      print('播放调试: url[$i]=${urls[i]}');
+    }
     if (requestId != _playRequestId) return;
-    if (audioFile == null) {
-      debugPrint('无法播放歌曲: ${song.songName} - 未获得可用音频文件');
+    if (urls.isEmpty) {
+      print('播放调试: 无法获取播放URL，播放中止');
       _processingState = ProcessingState.idle;
       notifyListeners();
       return;
@@ -430,54 +531,79 @@ class AudioPlayerManager extends ChangeNotifier {
       });
     }
 
-    // 3. 驱动播放器播放
+    // 3. 与 Go 原版一致：优先同步缓存整首歌曲，再播放本地文件。
+    File? audioFile;
     try {
-      if (_gaplessPlayback) {
-        _gaplessSource = ConcatenatingAudioSource(
-          useLazyPreparation: true,
-          children: [AudioSource.file(audioFile.path)],
-        );
-        _gaplessSongIndexes
-          ..clear()
-          ..add(_currentIndex);
-        _preparingSourceIndex = null;
-        await _player.setAudioSource(_gaplessSource!);
-      } else {
-        _clearGaplessState();
-        await _player.setFilePath(audioFile.path);
+      final cache = await MediaCacheService.instance;
+      for (var i = 0; i < urls.length; i++) {
+        try {
+          print('播放调试: 获取本地音频 (${i + 1}/${urls.length})');
+          audioFile = await cache.getAudio(
+            hash: song.hash,
+            quality: quality,
+            url: urls[i],
+          );
+          break;
+        } catch (e) {
+          print('播放调试: 缓存音频失败(${i + 1}/${urls.length}): $e');
+        }
       }
-      if (requestId != _playRequestId) return;
-      await _player.play();
-      await MusicApiService.addPlayHistory(song);
-      _prepareGaplessNext(requestId);
     } catch (e) {
-      debugPrint('播放音频异常: $e');
+      print('播放调试: 初始化音频缓存失败: $e');
     }
-  }
 
-  Future<File?> _cachedOnlineAudio(Song song, String quality) async {
-    final urls = await MusicApiService.getPlayUrls(
-      song.hash,
-      songName: song.songName,
-      artist: song.authorName,
-      quality: quality,
-    );
-    if (urls.isEmpty) return null;
-
-    final cache = await MediaCacheService.instance;
-    for (var index = 0; index < urls.length; index++) {
+    if (audioFile != null && requestId == _playRequestId) {
       try {
-        final file = await cache.getAudio(
-          hash: song.hash,
-          quality: quality,
-          url: urls[index],
-        );
-        if (await file.length() > 0) return file;
+        print('播放调试: 本地音频已就绪 ${audioFile.path}');
+        _clearGaplessState();
+        await _player.pause();
+        await _player.setFilePath(audioFile.path).timeout(
+              const Duration(seconds: 5),
+              onTimeout: () => throw TimeoutException('本地音频加载超时'),
+            );
+        if (requestId != _playRequestId) return;
+        unawaited(_player.play());
+        if (requestId != _playRequestId) return;
+        print('播放调试: 本地音频播放已启动');
+        await MusicApiService.addPlayHistory(song);
+        _prepareGaplessNext(requestId);
+        return;
       } catch (e) {
-        debugPrint('缓存音频失败(${index + 1}/${urls.length}): $e');
+        print('播放调试: 本地播放器启动失败: $e');
       }
     }
-    return null;
+
+    // 缓存下载或本地播放器启动失败时才回退远程流。
+    final headers = {
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+      'Referer': 'https://www.kugou.com/',
+    };
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        print('播放调试: 回退远程音频 (${i + 1}/${urls.length})');
+        _clearGaplessState();
+        await _player
+            .setAudioSource(
+              AudioSource.uri(Uri.parse(urls[i]), headers: headers),
+            )
+            .timeout(
+              const Duration(seconds: 5),
+              onTimeout: () => throw TimeoutException('远程音频加载超时'),
+            );
+        if (requestId != _playRequestId) return;
+        await _player.play();
+        print('播放调试: 远程音频播放已启动');
+        await MusicApiService.addPlayHistory(song);
+        _prepareGaplessNext(requestId);
+        return;
+      } catch (e) {
+        print('播放调试: 远程音频失败(${i + 1}/${urls.length}): $e');
+      }
+    }
+
+    _processingState = ProcessingState.idle;
+    notifyListeners();
   }
 
   void _clearGaplessState() {
@@ -522,9 +648,22 @@ class AudioPlayerManager extends ChangeNotifier {
         _preparingSourceIndex = null;
         return;
       }
-      final audioFile = await _cachedOnlineAudio(nextSong, quality);
-      if (audioFile != null) {
-        source = AudioSource.file(audioFile.path);
+      // 获取在线 URL 直接用于 gapless 预加载
+      final urls = await MusicApiService.getPlayUrls(
+        nextSong.hash,
+        songName: nextSong.songName,
+        artist: nextSong.authorName,
+        quality: quality,
+      );
+      if (urls.isNotEmpty) {
+        source = AudioSource.uri(
+          Uri.parse(urls.first),
+          headers: {
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+            'Referer': 'https://www.kugou.com/',
+          },
+        );
       }
     }
     if (requestId != _playRequestId ||
@@ -746,8 +885,11 @@ class AudioPlayerManager extends ChangeNotifier {
   void setVolume(double val) {
     _volume = val.clamp(0.0, 1.0);
     _player.setVolume(_volume);
-    SharedPreferences.getInstance()
-        .then((prefs) => prefs.setDouble('playback_volume', _volume));
+    _volumePersistTimer?.cancel();
+    _volumePersistTimer = Timer(const Duration(milliseconds: 300), () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble('playback_volume', _volume);
+    });
     notifyListeners();
   }
 
@@ -775,6 +917,13 @@ class AudioPlayerManager extends ChangeNotifier {
 
   @override
   void dispose() {
+    _progressNotificationTimer?.cancel();
+    final persistVolume = _volumePersistTimer?.isActive ?? false;
+    _volumePersistTimer?.cancel();
+    if (persistVolume) {
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setDouble('playback_volume', _volume));
+    }
     _player.dispose();
     super.dispose();
   }

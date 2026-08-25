@@ -286,7 +286,6 @@ class _LocalMusicScreenState extends State<LocalMusicScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final player = context.watch<AudioPlayerManager>();
     final artistCount =
         _localSongs.map((song) => song.authorName).toSet().length;
     final albumCount = _localSongs
@@ -295,190 +294,208 @@ class _LocalMusicScreenState extends State<LocalMusicScreen> {
         .toSet()
         .length;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                '本地音乐',
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                icon: const Icon(
-                  Icons.create_new_folder_rounded,
-                  size: 16,
-                  color: Colors.white,
-                ),
-                label: const Text(
-                  '添加文件夹',
-                  style: TextStyle(color: Colors.white, fontSize: 12),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.accentOrange,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  elevation: 0,
-                ),
-                onPressed: _addFolder,
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                icon: Icon(
-                  Icons.play_arrow_rounded,
-                  size: 16,
-                  color: AppTheme.textPrimary,
-                ),
-                label: Text(
-                  '播放全部',
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: AppTheme.borderWarm),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                ),
-                onPressed: _localSongs.isNotEmpty
-                    ? () => player.playAll(_localSongs)
-                    : null,
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: _isScanning
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(
-                        Icons.sync_rounded,
-                        color: AppTheme.textSecondary,
-                      ),
-                tooltip: '扫描音乐',
-                onPressed: _isScanning ? null : _scanMusic,
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              _buildStatCard('${_localSongs.length}', '首歌曲'),
-              const SizedBox(width: 16),
-              _buildStatCard('$artistCount', '位艺术家'),
-              const SizedBox(width: 16),
-              _buildStatCard('$albumCount', '张专辑'),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Container(
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceWhite,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.borderWarm),
-            ),
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(32, 24, 32, 0),
+          sliver: SliverToBoxAdapter(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ListTile(
-                  leading: Icon(
-                    Icons.folder_open_rounded,
-                    color: AppTheme.accentOrange,
-                  ),
-                  title: const Text(
-                    '音乐文件夹路径',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  subtitle: Text(
-                    '${_folderPaths.length} 个路径',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
+                Row(
+                  children: [
+                    Text(
+                      '本地音乐',
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textPrimary,
+                      ),
                     ),
-                  ),
-                  trailing: IconButton(
-                    icon: Icon(
-                      _isPathExpanded ? Icons.expand_less : Icons.expand_more,
+                    const Spacer(),
+                    ElevatedButton.icon(
+                      icon: const Icon(
+                        Icons.create_new_folder_rounded,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                      label: const Text(
+                        '添加文件夹',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.accentOrange,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        elevation: 0,
+                      ),
+                      onPressed: _addFolder,
                     ),
-                    onPressed: () =>
-                        setState(() => _isPathExpanded = !_isPathExpanded),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      icon: Icon(
+                        Icons.play_arrow_rounded,
+                        size: 16,
+                        color: AppTheme.textPrimary,
+                      ),
+                      label: Text(
+                        '播放全部',
+                        style: TextStyle(
+                            color: AppTheme.textPrimary, fontSize: 12),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: AppTheme.borderWarm),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                      ),
+                      onPressed: _localSongs.isNotEmpty
+                          ? () => context
+                              .read<AudioPlayerManager>()
+                              .playAll(_localSongs)
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: _isScanning
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              Icons.sync_rounded,
+                              color: AppTheme.textSecondary,
+                            ),
+                      tooltip: '扫描音乐',
+                      onPressed: _isScanning ? null : _scanMusic,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    _buildStatCard('${_localSongs.length}', '首歌曲'),
+                    const SizedBox(width: 16),
+                    _buildStatCard('$artistCount', '位艺术家'),
+                    const SizedBox(width: 16),
+                    _buildStatCard('$albumCount', '张专辑'),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceWhite,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.borderWarm),
+                  ),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        leading: Icon(
+                          Icons.folder_open_rounded,
+                          color: AppTheme.accentOrange,
+                        ),
+                        title: const Text(
+                          '音乐文件夹路径',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                        subtitle: Text(
+                          '${_folderPaths.length} 个路径',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        trailing: IconButton(
+                          icon: Icon(
+                            _isPathExpanded
+                                ? Icons.expand_less
+                                : Icons.expand_more,
+                          ),
+                          onPressed: () => setState(
+                              () => _isPathExpanded = !_isPathExpanded),
+                        ),
+                      ),
+                      if (_isPathExpanded)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          child: _folderPaths.isEmpty
+                              ? Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
+                                  child: Text(
+                                    '还没有添加任何音乐文件夹路径，点击右上角“添加文件夹”开始添加',
+                                    style: TextStyle(
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                )
+                              : Column(
+                                  children: _folderPaths.map((path) {
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 4),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.folder,
+                                            size: 16,
+                                            color: AppTheme.textSecondary,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              path,
+                                              style:
+                                                  const TextStyle(fontSize: 12),
+                                            ),
+                                          ),
+                                          IconButton(
+                                            icon: Icon(
+                                              Icons.close,
+                                              size: 16,
+                                              color: AppTheme.textSecondary,
+                                            ),
+                                            onPressed: () =>
+                                                _removeFolder(path),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                ),
+                        ),
+                    ],
                   ),
                 ),
-                if (_isPathExpanded)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: _folderPaths.isEmpty
-                        ? Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            child: Text(
-                              '还没有添加任何音乐文件夹路径，点击右上角“添加文件夹”开始添加',
-                              style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 12,
-                              ),
-                            ),
-                          )
-                        : Column(
-                            children: _folderPaths.map((path) {
-                              return Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 4),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.folder,
-                                      size: 16,
-                                      color: AppTheme.textSecondary,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        path,
-                                        style: const TextStyle(fontSize: 12),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      icon: Icon(
-                                        Icons.close,
-                                        size: 16,
-                                        color: AppTheme.textSecondary,
-                                      ),
-                                      onPressed: () => _removeFolder(path),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                  ),
+                const SizedBox(height: 24),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-          if (_localSongs.isEmpty)
-            Container(
+        ),
+        if (_localSongs.isEmpty)
+          SliverToBoxAdapter(
+            child: Container(
               padding: const EdgeInsets.symmetric(vertical: 40),
               alignment: Alignment.center,
               child: Text(
                 '暂无本地音乐，请先添加文件夹',
                 style: TextStyle(color: AppTheme.textSecondary),
               ),
-            )
-          else
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
+            ),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(32, 0, 32, 24),
+            sliver: SliverList.separated(
               itemCount: _localSongs.length,
               separatorBuilder: (_, __) =>
                   Divider(height: 1, color: AppTheme.borderWarm),
@@ -524,13 +541,14 @@ class _LocalMusicScreenState extends State<LocalMusicScreen> {
                       Icons.play_circle_outline_rounded,
                       color: AppTheme.accentOrange,
                     ),
-                    onPressed: () => player.playSong(song),
+                    onPressed: () =>
+                        context.read<AudioPlayerManager>().playSong(song),
                   ),
                 );
               },
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 

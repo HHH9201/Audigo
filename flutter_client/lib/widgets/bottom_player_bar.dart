@@ -1,6 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/audio_player_manager.dart';
@@ -23,6 +25,32 @@ class BottomPlayerBar extends StatefulWidget {
 
 class _BottomPlayerBarState extends State<BottomPlayerBar> {
   bool _showVolumePopover = false;
+  int _debugLastBuildReportMs = -1000;
+
+  void _reportProgressDebug(AudioPlayerManager player) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _debugLastBuildReportMs < 1000) return;
+    _debugLastBuildReportMs = now;
+    unawaited(HttpClient()
+        .postUrl(Uri.parse('http://127.0.0.1:7777/event'))
+        .then<void>((request) async {
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode({
+        'sessionId': 'progress-bar-stale',
+        'runId': 'pre-fix',
+        'hypothesisId': 'B',
+        'location': 'bottom_player_bar.dart',
+        'msg': '[DEBUG] progress UI build',
+        'data': {
+          'positionMs': player.currentPosition.inMilliseconds,
+          'durationMs': player.totalDuration.inMilliseconds,
+          'isPlaying': player.isPlaying
+        },
+        'ts': DateTime.now().millisecondsSinceEpoch
+      }));
+      await request.close();
+    }, onError: (_, __) {}));
+  }
 
   String _formatDuration(Duration duration) {
     final minutes = duration.inMinutes.remainder(60).toString().padLeft(1, '0');
@@ -33,6 +61,7 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
   @override
   Widget build(BuildContext context) {
     final player = context.watch<AudioPlayerManager>();
+    _reportProgressDebug(player);
     final song = player.currentSong;
     final isFav = song != null && player.isFavorite(song.hash);
 
@@ -73,7 +102,11 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
                       ? () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => LyricView()),
+                            MaterialPageRoute(
+                              builder: (_) => LyricView(
+                                onExit: () => Navigator.pop(context),
+                              ),
+                            ),
                           );
                         }
                       : null,
@@ -417,7 +450,11 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
                       ? () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => LyricView()),
+                            MaterialPageRoute(
+                              builder: (_) => LyricView(
+                                onExit: () => Navigator.pop(context),
+                              ),
+                            ),
                           );
                         }
                       : null,

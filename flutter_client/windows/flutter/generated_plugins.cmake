@@ -6,7 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
   desktop_multi_window
   hotkey_manager_windows
-  media_kit_libs_windows_audio
+  just_audio_windows
   screen_retriever
   tray_manager
   window_manager

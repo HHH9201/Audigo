@@ -106,6 +106,10 @@ class MediaCacheService {
       await _audioDownloader(url, temporary.path);
       final length = await temporary.length();
       if (length <= 0) throw const FileSystemException('下载的音频为空');
+      if (!_isValidAudioHeader(temporary)) {
+        throw FileSystemException(
+            '下载的内容不是有效的音频文件（可能是 HTML 错误页）', temporary.path);
+      }
       await temporary.rename(target.path);
       await _writeMetadata(metadata, length);
       return target;
@@ -164,7 +168,14 @@ class MediaCacheService {
       final length = await file.length();
       if (length <= 0) return false;
       final decoded = jsonDecode(await metadata.readAsString());
-      return decoded is Map && decoded['length'] == length;
+      if (decoded is! Map || decoded['length'] != length) return false;
+      // 校验文件头，防止之前缓存的 HTML 错误页被当作音频
+      if (!_isValidAudioHeader(file)) {
+        await _deleteIfExists(file);
+        await _deleteIfExists(metadata);
+        return false;
+      }
+      return true;
     } on Object {
       await _deleteIfExists(file);
       await _deleteIfExists(metadata);
@@ -180,11 +191,75 @@ class MediaCacheService {
     await temporary.rename(target.path);
   }
 
+  static bool _isValidAudioHeader(File file) {
+    try {
+      final raf = file.openSync(mode: FileMode.read);
+      try {
+        final header = raf.readSync(16);
+        if (header.length < 4) return false;
+        // MP3: ID3 tag or sync word 0xFF 0xFB/0xFF 0xF3/0xFF 0xF2
+        if (header[0] == 0x49 && header[1] == 0x44 && header[2] == 0x33) {
+          return true; // 'ID3'
+        }
+        if (header[0] == 0xFF &&
+            (header[1] == 0xFB || header[1] == 0xF3 || header[1] == 0xF2)) {
+          return true; // MP3 sync word
+        }
+        // FLAC: 'fLaC'
+        if (header[0] == 0x66 &&
+            header[1] == 0x4C &&
+            header[2] == 0x61 &&
+            header[3] == 0x43) {
+          return true;
+        }
+        // RIFF (WAV)
+        if (header[0] == 0x52 &&
+            header[1] == 0x49 &&
+            header[2] == 0x46 &&
+            header[3] == 0x46) {
+          return true;
+        }
+        // AAC ADTS: 0xFF 0xF1 or 0xFF 0xF9
+        if (header[0] == 0xFF && (header[1] == 0xF1 || header[1] == 0xF9)) {
+          return true;
+        }
+        // OGG: 'OggS'
+        if (header[0] == 0x4F &&
+            header[1] == 0x67 &&
+            header[2] == 0x67 &&
+            header[3] == 0x53) {
+          return true;
+        }
+        // m4a/mp4: 'ftyp' at offset 4
+        if (header.length >= 8 &&
+            header[4] == 0x66 &&
+            header[5] == 0x74 &&
+            header[6] == 0x79 &&
+            header[7] == 0x70) {
+          return true;
+        }
+        return false;
+      } finally {
+        raf.closeSync();
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<void> _downloadAudio(String url, String path) async {
     await Dio().download(
       url,
       path,
-      options: Options(headers: const {'Accept-Encoding': 'identity'}),
+      options: Options(headers: const {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': 'audio/mpeg,audio/*,*/*',
+        'Accept-Encoding': 'identity',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Cache-Control': 'no-cache',
+        'Referer': 'https://www.kugou.com/',
+      }),
     );
   }
 

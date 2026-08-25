@@ -8,11 +8,21 @@ class ThemeController extends ChangeNotifier {
 
   ThemeController._(this._mode) {
     AppTheme.apply(_mode);
+    WidgetsBinding.instance.platformDispatcher.onPlatformBrightnessChanged =
+        _handleBrightnessChanged;
   }
 
   AppThemeMode _mode;
   AppThemeMode get mode => _mode;
-  ThemeData get theme => AppTheme.themeFor(_mode);
+
+  Brightness get _systemBrightness =>
+      WidgetsBinding.instance.platformDispatcher.platformBrightness;
+
+  /// 解析后的实际主题模式（跟随系统时映射为明/暗）。
+  AppThemeMode get resolvedMode =>
+      AppTheme.resolveSystem(_mode, _systemBrightness);
+
+  ThemeData get theme => AppTheme.themeFor(_mode, brightness: _systemBrightness);
 
   static Future<ThemeController> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -28,6 +38,14 @@ class ThemeController extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_preferenceKey, mode.index);
     notifyListeners();
+  }
+
+  void _handleBrightnessChanged() {
+    // 仅当处于“跟随系统”模式时，系统明暗变化才需要刷新主题。
+    if (_mode == AppThemeMode.system) {
+      AppTheme.apply(_mode);
+      notifyListeners();
+    }
   }
 
   Future<void> cycle() {
