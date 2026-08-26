@@ -17,8 +17,6 @@ namespace {
 constexpr wchar_t kDebugHost[] = L"127.0.0.1";
 constexpr INTERNET_PORT kDebugPort = 7777;
 constexpr wchar_t kDebugPath[] = L"/event";
-constexpr int kLyricsWidth = 720;
-constexpr int kLyricsOffsetX = 12;
 
 using flutter::EncodableMap;
 using flutter::EncodableValue;
@@ -147,13 +145,10 @@ class TaskbarLyricsPlugin : public flutter::Plugin {
     if (GetWindowLongPtrW(window, index) == value) {
       return true;
     }
-    SetLastError(ERROR_SUCCESS);
-    const LONG_PTR previous = SetWindowLongPtrW(window, index, value);
-    const DWORD last_error = GetLastError();
-    if (previous == 0 && last_error != ERROR_SUCCESS) {
-      *error = "SetWindowLongPtr failed: " + std::to_string(last_error);
-      return false;
-    }
+    SetWindowLongPtrW(window, index, value);
+    // SetWindowLongPtr 成功时不会清空 GetLastError，可能残留上次 Win32 调用
+    // 的错误码；返回值 previous 为 0 也可能是合法的旧样式。窗口句柄在上层已
+    // 经验证有效，此处不再用 previous==0 + error 误判为失败。
     return true;
   }
 
@@ -227,18 +222,8 @@ class TaskbarLyricsPlugin : public flutter::Plugin {
       has_original_state_ = true;
     }
 
-    const LONG_PTR child_style =
-        (original_style_ | WS_CHILD) &
-        ~(static_cast<LONG_PTR>(WS_POPUP) | WS_CAPTION | WS_THICKFRAME);
-    if (!SetWindowStyle(window, GWL_STYLE, child_style, error) ||
-        !SetWindowStyle(window, GWL_EXSTYLE,
-                        original_ex_style_ & ~WS_EX_TOPMOST, error)) {
-      std::string restore_error;
-      RestoreWindow(&restore_error);
-      if (!restore_error.empty()) *error += "; " + restore_error;
-      return false;
-    }
-
+    // === 与 Go 版 taskbar_attach_windows.go 逐行保持一致 ===
+    // 1) 先 SetParent，再设样式
     SetLastError(ERROR_SUCCESS);
     const HWND previous_parent = SetParent(window, taskbar);
     const DWORD parent_error = GetLastError();
@@ -250,12 +235,37 @@ class TaskbarLyricsPlugin : public flutter::Plugin {
       return false;
     }
 
-    if (host_window_ && IsWindow(host_window_)) {
-      ShowWindow(host_window_, SW_HIDE);
+    // 2) GWL_STYLE = WS_CHILD
+    const LONG_PTR child_style =
+        (original_style_ | WS_CHILD) &
+        ~(static_cast<LONG_PTR>(WS_POPUP) | WS_CAPTION | WS_THICKFRAME);
+    if (!SetWindowStyle(window, GWL_STYLE, child_style, error) ||
+        // 3) GWL_EXSTYLE = 0 （与 Go 一致，不保留 WS_EX_TRANSPARENT 等）
+        !SetWindowStyle(window, GWL_EXSTYLE, 0L, error)) {
+      std::string restore_error;
+      RestoreWindow(&restore_error);
+      if (!restore_error.empty()) *error += "; " + restore_error;
+      return false;
     }
-    if (!SetWindowPos(window, HWND_TOP, kLyricsOffsetX, 0, kLyricsWidth,
-                      taskbar_height, SWP_NOACTIVATE | SWP_SHOWWINDOW |
-                          SWP_FRAMECHANGED)) {
+
+    // 4) 高度取任务栏，clamp 48~70；宽度固定 720；x=12（可被 clamp）
+    long embed_height = taskbar_height;
+    if (embed_height < 48) embed_height = 48;
+    if (embed_height > 70) embed_height = 70;
+    constexpr long kEmbedWidth = 720;
+    const long max_x = taskbar_client.right - taskbar_client.left - kEmbedWidth;
+    long embed_x = 12;
+    if (embed_x < 0) embed_x = 0;
+    if (max_x > 0 && embed_x > max_x) embed_x = max_x;
+    const long max_y = taskbar_height - embed_height;
+    long embed_y = 0;
+    if (embed_y < 0) embed_y = 0;
+    if (max_y > 0 && embed_y > max_y) embed_y = max_y;
+
+    // 5) SetWindowPos：NOZORDER|NOACTIVATE|SHOWWINDOW，无 FRAMECHANGED、无重绘
+    if (!SetWindowPos(window, nullptr, (int)embed_x, (int)embed_y,
+                      (int)kEmbedWidth, (int)embed_height,
+                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW)) {
       *error = "SetWindowPos after SetParent failed: " +
                std::to_string(GetLastError());
       std::string restore_error;

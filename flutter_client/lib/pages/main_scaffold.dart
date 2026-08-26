@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -36,6 +39,9 @@ class _NavigationState {
 }
 
 class _MainScaffoldState extends State<MainScaffold> {
+  bool get _isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
   _NavigationState _navigationState = _NavigationState(0);
   final List<_NavigationState> _backStack = [];
   final List<_NavigationState> _forwardStack = [];
@@ -238,9 +244,12 @@ class _MainScaffoldState extends State<MainScaffold> {
   Widget _buildCustomTitleBar(BuildContext context) {
     return GestureDetector(
       onPanStart: (details) {
-        windowManager.startDragging();
+        if (_isDesktop) {
+          windowManager.startDragging();
+        }
       },
       onDoubleTap: () async {
+        if (!_isDesktop) return;
         if (await windowManager.isMaximized()) {
           windowManager.unmaximize();
         } else {
@@ -391,17 +400,19 @@ class _MainScaffoldState extends State<MainScaffold> {
                   child: VerticalDivider(width: 1, color: Color(0x20000000)),
                 ),
                 const SizedBox(width: 6),
-                // 窗口控制三键
-                _buildTitleBtn(
-                    Icons.remove, "最小化", () => windowManager.minimize()),
-                _buildTitleBtn(Icons.crop_square, "最大化/还原", () async {
-                  if (await windowManager.isMaximized()) {
-                    windowManager.unmaximize();
-                  } else {
-                    windowManager.maximize();
-                  }
-                }),
-                _buildTitleBtn(Icons.close, "关闭", _handleClose),
+                // 窗口控制三键（仅桌面端）
+                if (_isDesktop) ...[
+                  _buildTitleBtn(
+                      Icons.remove, "最小化", () => windowManager.minimize()),
+                  _buildTitleBtn(Icons.crop_square, "最大化/还原", () async {
+                    if (await windowManager.isMaximized()) {
+                      windowManager.unmaximize();
+                    } else {
+                      windowManager.maximize();
+                    }
+                  }),
+                  _buildTitleBtn(Icons.close, "关闭", _handleClose),
+                ],
               ],
             ),
           ],

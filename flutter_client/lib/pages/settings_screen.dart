@@ -28,8 +28,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'auto_play_next': true,
     'gapless_playback': true,
     'wifi_only_high_quality': false,
-    'show_lyrics': true,
-    'taskbar_lyrics': true,
+    'taskbar_lyrics': false,
     'download_lyrics': true,
     'download_path': '',
     'lyrics_font_size': 22,
@@ -48,8 +47,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _gaplessPlayback = true;
   bool _wifiOnly = false;
   bool _cacheBeforePlay = true; // 先缓存整首再播放；关闭则直接流式播放
-  bool _showLyrics = true;
-  bool _taskbarLyrics = true;
+  bool _desktopLyrics = true;
+  bool _taskbarLyrics = false;
   bool _downloadLyrics = true;
   String _downloadPath = '';
   int _lyricsFontSize = 22;
@@ -92,8 +91,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _gaplessPlayback = prefs.getBool('gapless_playback') ?? true;
       _wifiOnly = prefs.getBool('wifi_only_high_quality') ?? false;
       _cacheBeforePlay = prefs.getBool('cache_before_play') ?? true;
-      _showLyrics = prefs.getBool('show_lyrics') ?? true;
-      _taskbarLyrics = prefs.getBool('taskbar_lyrics') ?? true;
+      _desktopLyrics = prefs.getBool('desktop_lyrics') ?? true;
+      _taskbarLyrics = prefs.getBool('taskbar_lyrics') ?? false;
       _downloadLyrics = prefs.getBool('download_lyrics') ?? true;
       _downloadPath = prefs.getString('download_path') ?? '';
       _lyricsFontSize = prefs.getInt('lyrics_font_size') ?? 22;
@@ -709,19 +708,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           },
                         ),
                       ),
-                      _settingCell(
-                        icon: Icons.lyrics_rounded,
-                        title: '显示歌词',
-                        horizontal: true,
-                        control: Switch(
-                          value: _showLyrics,
-                          onChanged: (value) => _savePlayerBool(
-                            'show_lyrics',
-                            value,
-                            () => _showLyrics = value,
-                          ),
-                        ),
-                      ),
                       if (DesktopLyricsManager.isSupported) ...[
                         _settingCell(
                           icon: Icons.desktop_windows_rounded,
@@ -729,18 +715,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           subtitle: '透明置顶的独立逐字歌词窗口',
                           horizontal: true,
                           control: Switch(
-                            value: _taskbarLyrics,
-                            onChanged: (value) async {
-                              await DesktopLyricsManager.instance
-                                  .setEnabled(value);
-                              await DesktopLifecycleManager.instance
-                                  .refreshTrayMenu();
-                              if (mounted) {
-                                setState(() => _taskbarLyrics = value);
-                              }
+                            value: _desktopLyrics,
+                            onChanged: (value) {
+                              // 乐观更新：先让开关立即响应，再后台执行窗口操作
+                              setState(() => _desktopLyrics = value);
+                              DesktopLyricsManager.instance
+                                  .setEnabled(value)
+                                  .then((_) =>
+                                      DesktopLifecycleManager.instance
+                                          .refreshTrayMenu());
                             },
                           ),
                         ),
+                        if (Platform.isWindows)
+                          _settingCell(
+                            icon: Icons.view_week_rounded,
+                            title: '任务栏歌词',
+                            subtitle: '将歌词内嵌到 Windows 任务栏（桌面浮窗可切换）',
+                            horizontal: true,
+                            control: Switch(
+                              value: _taskbarLyrics,
+                              onChanged: (value) {
+                                // 乐观更新：先让开关立即响应，再后台执行内嵌/恢复
+                                setState(() => _taskbarLyrics = value);
+                                DesktopLyricsManager.instance
+                                    .setTaskbarEnabled(value);
+                              },
+                            ),
+                          ),
                         _settingCell(
                           icon: Icons.format_size_rounded,
                           title: '歌词文字大小',

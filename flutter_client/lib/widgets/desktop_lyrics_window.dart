@@ -32,11 +32,35 @@ class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
           if (value is String && mounted) {
             setState(() => _snapshot = _LyricsSnapshot.fromJson(value));
           }
+        case 'lyrics_attach':
+          return await _runTaskbarOperation(attach: true);
+        case 'lyrics_detach':
+          return await _runTaskbarOperation(attach: false);
         case 'close':
           await windowManager.destroy();
       }
+      return null;
     });
     _loadFontSize();
+  }
+
+  Future<Map<String, dynamic>> _runTaskbarOperation(
+      {required bool attach}) async {
+    if (!Platform.isWindows) {
+      return {'attached': false, 'error': 'unsupported'};
+    }
+    const channel = MethodChannel('musichub/taskbar_lyrics');
+    try {
+      final result = await channel.invokeMethod<dynamic>(
+          attach ? 'attach' : 'detach');
+      final map = result is Map ? Map<String, dynamic>.from(result) : {};
+      return {
+        'attached': attach && map['attached'] == true,
+        'error': map['error'],
+      };
+    } catch (error) {
+      return {'attached': false, 'error': '$error'};
+    }
   }
 
   Future<void> _loadFontSize() async {
@@ -243,7 +267,17 @@ Future<void> configureDesktopLyricsWindow() async {
       await windowManager.setSkipTaskbar(true);
       await windowManager.setPosition(Offset(x, y));
       await windowManager.show();
-      if (Platform.isWindows) unawaited(attachToWindowsTaskbar());
+      // 任务栏歌词开关开启时，在窗口自身引擎内嵌入任务栏（该引擎内原生通道
+      // 已注册，比主窗口跨窗口调用更可靠）；关闭时保持桌面浮窗。
+      final embedTaskbar =
+          Platform.isWindows && (await prefs.getBool('taskbar_lyrics')) == true;
+      if (embedTaskbar) {
+        // 与 Go 版一致：先等本窗口完成首帧渲染（约 500ms），再挂载进任务栏。
+        // 若立即 SetParent，Flutter 从未在窗口中绘制，挂进去后也不会重绘导致空白。
+        Future<void>.delayed(const Duration(milliseconds: 600), () {
+          unawaited(attachToWindowsTaskbar());
+        });
+      }
     },
   );
 }

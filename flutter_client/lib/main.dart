@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +19,10 @@ import 'pages/main_scaffold.dart';
 import 'theme/theme_controller.dart';
 import 'widgets/desktop_lyrics_window.dart';
 
+/// 是否桌面端。窗口管理、托盘、多窗口歌词等仅桌面功能在此为 true。
+final bool kIsDesktop =
+    !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   // 初始化 libmpv 播放引擎（just_audio 的 Windows/Linux 平台实现）。
@@ -30,8 +35,6 @@ Future<void> main(List<String> args) async {
       return;
     }
   }
-  await windowManager.ensureInitialized();
-
   WindowOptions windowOptions = const WindowOptions(
     size: Size(1280, 800),
     minimumSize: Size(960, 640),
@@ -43,14 +46,17 @@ Future<void> main(List<String> args) async {
 
   final preferences = await SharedPreferences.getInstance();
   final startMinimized = preferences.getBool('start_minimized') ?? false;
-  windowManager.waitUntilReadyToShow(windowOptions, () async {
-    if (startMinimized) {
-      await DesktopLifecycleManager.instance.hideToTray();
-    } else {
-      await windowManager.show();
-      await windowManager.focus();
-    }
-  });
+  if (kIsDesktop) {
+    await windowManager.ensureInitialized();
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      if (startMinimized) {
+        await DesktopLifecycleManager.instance.hideToTray();
+      } else {
+        await windowManager.show();
+        await windowManager.focus();
+      }
+    });
+  }
 
   final themeController = await ThemeController.load();
   final audioPlayerManager = AudioPlayerManager();
@@ -72,13 +78,16 @@ Future<void> main(List<String> args) async {
 Future<void> _initializeDeferredServices(
   AudioPlayerManager audioPlayerManager,
 ) async {
-  final initializations = <Future<void>>[
-    DesktopLifecycleManager.instance.initialize(audioPlayerManager),
-    DesktopLyricsManager.instance.initialize(audioPlayerManager),
-    DesktopMediaKeyManager.instance.initialize(audioPlayerManager),
-    MprisService.instance.initialize(audioPlayerManager),
-  ];
-  if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
+  final initializations = <Future<void>>[];
+  if (kIsDesktop) {
+    final desktopInit = <Future<void>>[
+      DesktopLifecycleManager.instance.initialize(audioPlayerManager),
+      DesktopLyricsManager.instance.initialize(audioPlayerManager),
+      DesktopMediaKeyManager.instance.initialize(audioPlayerManager),
+      MprisService.instance.initialize(audioPlayerManager),
+    ];
+    initializations.addAll(desktopInit);
+  } else if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
     initializations.add(
       AudioService.init(
         builder: () => MusicAudioHandler(audioPlayerManager),

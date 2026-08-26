@@ -13,7 +13,8 @@ class DesktopLyricsManager {
 
   static final DesktopLyricsManager instance = DesktopLyricsManager._();
 
-  static const preferenceKey = 'taskbar_lyrics';
+  static const preferenceKey = 'desktop_lyrics';
+  static const taskbarPreferenceKey = 'taskbar_lyrics';
   static const windowArgument = 'desktop_lyrics';
 
   static bool get isSupported =>
@@ -22,18 +23,22 @@ class DesktopLyricsManager {
   AudioPlayerManager? _player;
   WindowController? _window;
   bool _enabled = true;
+  bool _taskbarEnabled = false;
   bool _creating = false;
   String? _lastSnapshot;
   DateTime _lastSentAt = DateTime.fromMillisecondsSinceEpoch(0);
   Timer? _sendTimer;
 
   bool get enabled => _enabled;
+  bool get taskbarEnabled => _taskbarEnabled;
 
   Future<void> initialize(AudioPlayerManager player) async {
     if (!isSupported) return;
     _player = player;
     final preferences = await SharedPreferences.getInstance();
     _enabled = preferences.getBool(preferenceKey) ?? true;
+    _taskbarEnabled =
+        preferences.getBool(taskbarPreferenceKey) ?? false;
     player.addListener(_handlePlayerChanged);
     if (_enabled) await show();
   }
@@ -44,9 +49,19 @@ class DesktopLyricsManager {
     await _applyEnabled(value);
   }
 
+  /// 切换任务栏内嵌与否（桌面浮窗 <-> 内嵌任务栏）。仅 Windows 生效。
+  Future<void> setTaskbarEnabled(bool value) async {
+    _taskbarEnabled = value;
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(taskbarPreferenceKey, value);
+    await _applyTaskbar();
+  }
+
   Future<void> reloadSettings() async {
     if (!isSupported) return;
     final preferences = await SharedPreferences.getInstance();
+    _taskbarEnabled =
+        preferences.getBool(taskbarPreferenceKey) ?? false;
     await _applyEnabled(preferences.getBool(preferenceKey) ?? true);
   }
 
@@ -59,6 +74,36 @@ class DesktopLyricsManager {
   }
 
   Future<void> toggle() => setEnabled(!_enabled);
+
+  /// 根据 _taskbarEnabled 决定把歌词窗口内嵌到任务栏还是恢复成桌面浮窗。
+  Future<void> _applyTaskbar() async {
+    if (!isSupported || !_enabled || _window == null) return;
+    final method = _taskbarEnabled ? 'lyrics_attach' : 'lyrics_detach';
+    // 窗口引擎就绪需要一点时间，失败重试几次。
+    for (final delay in const [
+      Duration(milliseconds: 120),
+      Duration(milliseconds: 300),
+      Duration(milliseconds: 700),
+    ]) {
+      await Future<void>.delayed(delay);
+      try {
+        final window = _window;
+        if (window == null) return;
+        final result =
+            await window.invokeMethod<Map>('$method', null);
+        if (result is Map && result['attached'] == true) {
+          if (_taskbarEnabled) {
+            debugPrint('任务栏歌词已嵌入 Windows 任务栏');
+          } else {
+            debugPrint('任务栏歌词已恢复为桌面浮窗');
+          }
+          return;
+        }
+      } catch (error) {
+        debugPrint('歌词窗口切换任务栏状态失败: $error');
+      }
+    }
+  }
 
   Future<void> _applyEnabled(bool value) async {
     _enabled = value;
