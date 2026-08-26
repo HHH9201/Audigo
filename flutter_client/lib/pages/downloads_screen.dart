@@ -6,6 +6,7 @@ import '../models/song.dart';
 import '../services/audio_player_manager.dart';
 import '../services/music_api_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_toast.dart';
 
 class DownloadsScreen extends StatefulWidget {
   const DownloadsScreen({super.key});
@@ -55,9 +56,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     await MusicApiService.clearDownloadRecords();
     if (!mounted) return;
     setState(() => _downloads = []);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('下载记录与文件已清空')),
-    );
+    AppToast.show(context, '下载记录与文件已清空');
   }
 
   Future<void> _play(Map<String, dynamic> item) async {
@@ -100,8 +99,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    AppToast.show(context, message);
   }
 
   String _downloadTime(Map<String, dynamic> item) {

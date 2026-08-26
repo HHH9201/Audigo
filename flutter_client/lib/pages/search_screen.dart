@@ -7,7 +7,9 @@ import 'package:provider/provider.dart';
 import '../models/song.dart';
 import '../services/audio_player_manager.dart';
 import '../services/music_api_service.dart';
+import '../services/search_history_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_toast.dart';
 import 'album_detail_screen.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -34,6 +36,7 @@ class _SearchScreenState extends State<SearchScreen>
   late final TabController _tabController;
   Timer? _suggestionTimer;
 
+  List<String> _searchHistory = [];
   List<HotSearchCategory> _hotSearch = [];
   List<SearchSuggestion> _suggestions = [];
   List<Song> _songs = [];
@@ -54,8 +57,15 @@ class _SearchScreenState extends State<SearchScreen>
     super.initState();
     _tabController = TabController(length: _tabs.length, vsync: this);
     _controller.addListener(_onQueryChanged);
+    _loadSearchHistory();
     _loadHotSearch();
     _applyInitialQuery();
+  }
+
+  Future<void> _loadSearchHistory() async {
+    final history = await SearchHistoryService.load();
+    if (!mounted) return;
+    setState(() => _searchHistory = history);
   }
 
   @override
@@ -106,6 +116,9 @@ class _SearchScreenState extends State<SearchScreen>
     if (query.isEmpty) return;
     _suggestionTimer?.cancel();
     FocusScope.of(context).unfocus();
+    // 记录搜索历史
+    final history = await SearchHistoryService.add(query);
+    if (mounted) setState(() => _searchHistory = history);
     final generation = ++_searchGeneration;
     setState(() {
       _activeQuery = query;
@@ -220,8 +233,10 @@ class _SearchScreenState extends State<SearchScreen>
     final path = await MusicApiService.downloadSong(song);
     if (!mounted) return;
     setState(() => _downloadingHashes.remove(song.hash));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(path == null ? '下载失败或已取消' : '已下载到 $path')),
+    AppToast.show(
+      context,
+      path == null ? '下载失败或已取消' : '已下载到 $path',
+      isError: path == null,
     );
   }
 
@@ -306,8 +321,11 @@ class _SearchScreenState extends State<SearchScreen>
             dense: true,
             leading:
                 Icon(Icons.search, size: 18, color: AppTheme.textSecondary),
-            title: Text(suggestion.keyword,
-                maxLines: 1, overflow: TextOverflow.ellipsis),
+            title: Text.rich(
+              _highlightMatch(suggestion.keyword, _controller.text.trim()),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             trailing: Text(label,
                 style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
             onTap: () {
@@ -322,6 +340,39 @@ class _SearchScreenState extends State<SearchScreen>
         },
       ),
     );
+  }
+
+  // 对关键词里按输入顺序逐字命中的字符高亮（“单字索引”式模糊搜索展示）
+  TextSpan _highlightMatch(String keyword, String query) {
+    if (query.isEmpty) {
+      return TextSpan(
+          text: keyword, style: TextStyle(color: AppTheme.textPrimary));
+    }
+    final spans = <TextSpan>[];
+    final queryChars = query.split('');
+    var qi = 0;
+    var ci = 0;
+    for (; ci < keyword.length && qi < queryChars.length; ci++) {
+      final ch = keyword[ci];
+      if (ch == queryChars[qi]) {
+        spans.add(TextSpan(
+          text: ch,
+          style: TextStyle(
+              color: AppTheme.accentOrange, fontWeight: FontWeight.bold),
+        ));
+        qi++;
+      } else {
+        spans.add(TextSpan(text: ch, style: TextStyle(color: AppTheme.textPrimary)));
+      }
+    }
+    // 追加关键词剩余未匹配的字符（正常色）；不追加输入多余字符，避免内容串味
+    while (ci < keyword.length) {
+      spans.add(TextSpan(
+          text: keyword[ci], style: TextStyle(color: AppTheme.textPrimary)));
+      ci++;
+    }
+    return TextSpan(
+        text: '', style: TextStyle(color: AppTheme.textPrimary), children: spans);
   }
 
   Widget _buildTabs() {
@@ -340,7 +391,7 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   Widget _buildBody() {
-    if (_activeQuery.isEmpty) return _buildHotSearch();
+    if (_activeQuery.isEmpty) return _buildStartView();
     if (_isSearching) {
       return Center(
         child: CircularProgressIndicator(color: AppTheme.accentOrange),
@@ -358,64 +409,119 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  Widget _buildHotSearch() {
+  // 空查询状态：搜索历史（如有）+ 热搜列表
+  Widget _buildStartView() {
     if (_isHotSearchLoading) {
       return Center(
         child: CircularProgressIndicator(color: AppTheme.accentOrange),
       );
     }
-    if (_hotSearch.isEmpty) {
-      return Center(
-        child: Text('暂无热搜', style: TextStyle(color: AppTheme.textSecondary)),
-      );
-    }
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
       children: [
-        Text('热搜',
-            style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textPrimary)),
-        const SizedBox(height: 16),
-        for (final category in _hotSearch) ...[
-          Text(category.name,
+        if (_searchHistory.isNotEmpty) ..._buildHistorySection(),
+        if (_hotSearch.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Center(
+              child: Text('暂无热搜',
+                  style: TextStyle(color: AppTheme.textSecondary)),
+            ),
+          )
+        else ...[
+          Text('热搜',
               style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                   color: AppTheme.textPrimary)),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: category.keywords.asMap().entries.map((entry) {
-              final popular = entry.key < 3;
-              return ActionChip(
-                avatar: popular
-                    ? Icon(Icons.local_fire_department_rounded,
-                        size: 16, color: AppTheme.accentOrange)
-                    : null,
-                label: Text(entry.value),
-                backgroundColor: AppTheme.surfaceWhite,
-                side: BorderSide(
-                    color: popular
-                        ? AppTheme.accentOrange.withOpacity(0.45)
-                        : AppTheme.borderWarm),
-                onPressed: () {
-                  _controller.value = TextEditingValue(
-                    text: entry.value,
-                    selection:
-                        TextSelection.collapsed(offset: entry.value.length),
-                  );
-                  _doSearch(entry.value);
-                },
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+          for (final category in _hotSearch) ...[
+            Text(category.name,
+                style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary)),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: category.keywords.asMap().entries.map((entry) {
+                final popular = entry.key < 3;
+                return ActionChip(
+                  avatar: popular
+                      ? Icon(Icons.local_fire_department_rounded,
+                          size: 16, color: AppTheme.accentOrange)
+                      : null,
+                  label: Text(entry.value),
+                  backgroundColor: AppTheme.surfaceWhite,
+                  side: BorderSide(
+                      color: popular
+                          ? AppTheme.accentOrange.withOpacity(0.45)
+                          : AppTheme.borderWarm),
+                  onPressed: () {
+                    _controller.value = TextEditingValue(
+                      text: entry.value,
+                      selection:
+                          TextSelection.collapsed(offset: entry.value.length),
+                    );
+                    _doSearch(entry.value);
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 20),
+          ],
         ],
       ],
     );
+  }
+
+  List<Widget> _buildHistorySection() {
+    return [
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('搜索历史',
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary)),
+          TextButton.icon(
+            onPressed: () async {
+              await SearchHistoryService.clear();
+              if (!mounted) return;
+              setState(() => _searchHistory = []);
+            },
+            icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+            label: const Text('清空'),
+            style: TextButton.styleFrom(
+                foregroundColor: AppTheme.textSecondary,
+                visualDensity: VisualDensity.compact),
+          ),
+        ],
+      ),
+      const SizedBox(height: 4),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: _searchHistory.map((keyword) {
+          return ActionChip(
+            avatar: Icon(Icons.history, size: 15, color: AppTheme.textSecondary),
+            label: Text(keyword),
+            backgroundColor: AppTheme.surfaceWhite,
+            side: BorderSide(color: AppTheme.borderWarm),
+            onPressed: () {
+              _controller.value = TextEditingValue(
+                text: keyword,
+                selection: TextSelection.collapsed(offset: keyword.length),
+              );
+              _doSearch(keyword);
+            },
+          );
+        }).toList(),
+      ),
+      const SizedBox(height: 24),
+    ];
   }
 
   Widget _buildSongList() {
@@ -560,6 +666,20 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   void _openContent(Map<String, dynamic> item, int index) {
+    // 歌手：通过 onOpenDetail 在内容区打开歌手歌曲页（与专辑详情一致，不新开全屏路由）
+    if (index == 1) {
+      final name = item['title']?.toString() ?? '';
+      if (name.isEmpty) return;
+      widget.onOpenDetail(
+        AlbumDetailDestination(
+          id: name,
+          title: name,
+          coverUrl: item['cover']?.toString(),
+          type: 'artist',
+        ),
+      );
+      return;
+    }
     if (index != 2 && index != 3) return;
     final id = item['id']?.toString() ?? '';
     if (id.isEmpty) return;

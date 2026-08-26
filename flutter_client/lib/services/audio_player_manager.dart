@@ -17,6 +17,14 @@ enum RepeatMode { off, one, all }
 class AudioPlayerManager extends ChangeNotifier {
   final AudioPlayer _player = AudioPlayer();
 
+  // 高频进度通知器：仅用于进度条/歌词等高频刷新组件，
+  // 与主 ChangeNotifier 分离，避免每 100ms 全量重建所有页面。
+  final ChangeNotifier progressNotifier = ChangeNotifier();
+
+  // 播放进度刷新间隔（毫秒）。进度条 500ms 足够流畅且明显降低
+  // 高频重建对整体帧率的影响；歌词逐字高亮另有独立驱动。
+  static const int _progressNotifyIntervalMs = 500;
+
   // 当前播放列表与当前索引
   List<Song> _playlist = [];
   int _currentIndex = -1;
@@ -37,9 +45,9 @@ class AudioPlayerManager extends ChangeNotifier {
   bool _gaplessPlayback = true;
   bool _wifiOnlyHighQuality = false;
   bool _showLyrics = true;
+  bool _cacheBeforePlay = true; // 是否先缓存整首再播放（关闭则直接流式播放）
   int _playRequestId = 0;
   int? _preparingSourceIndex;
-  int _debugLastPositionReportMs = -1000;
   final List<int> _gaplessSongIndexes = [];
   ConcatenatingAudioSource? _gaplessSource;
 
@@ -83,7 +91,8 @@ class AudioPlayerManager extends ChangeNotifier {
   bool get autoPlayNext => _autoPlayNext;
   bool get gaplessPlayback => _gaplessPlayback;
   bool get showLyrics => _showLyrics;
-  List<LyricLine> get currentLyrics => _showLyrics ? _currentLyrics : const [];
+  // 始终返回已加载的歌词（沉浸式页面需要；showLyrics 仅控制是否主动加载）。
+  List<LyricLine> get currentLyrics => _currentLyrics;
   int get currentLyricIndex => _currentLyricIndex;
   int get currentLyricWordIndex => _currentLyricWordIndex;
   double get currentLyricWordProgress => _currentLyricWordProgress;
@@ -182,6 +191,7 @@ class AudioPlayerManager extends ChangeNotifier {
     _gaplessPlayback = prefs.getBool('gapless_playback') ?? true;
     _wifiOnlyHighQuality = prefs.getBool('wifi_only_high_quality') ?? false;
     _showLyrics = prefs.getBool('show_lyrics') ?? true;
+    _cacheBeforePlay = prefs.getBool('cache_before_play') ?? true;
     _volume = (prefs.getDouble('playback_volume') ?? 0.5).clamp(0.0, 1.0);
     await _player.setVolume(_volume);
     if (!_showLyrics) {
@@ -221,27 +231,6 @@ class AudioPlayerManager extends ChangeNotifier {
         : '128k';
   }
 
-  // #region debug-point progress-bar-stale:runtime-observation
-  void _reportProgressDebug(
-      String hypothesisId, String message, Map<String, dynamic> data) {
-    unawaited(HttpClient()
-        .postUrl(Uri.parse('http://127.0.0.1:7777/event'))
-        .then<void>((request) async {
-      request.headers.contentType = ContentType.json;
-      request.write(jsonEncode({
-        'sessionId': 'progress-bar-stale',
-        'runId': 'pre-fix',
-        'hypothesisId': hypothesisId,
-        'location': 'audio_player_manager.dart',
-        'msg': '[DEBUG] $message',
-        'data': data,
-        'ts': DateTime.now().millisecondsSinceEpoch
-      }));
-      await request.close();
-    }, onError: (_, __) {}));
-  }
-  // #endregion
-
   void _initAudioListeners() {
     _player.setVolume(_volume);
 
@@ -249,12 +238,6 @@ class AudioPlayerManager extends ChangeNotifier {
     _player.playerStateStream.listen((state) {
       _isPlaying = state.playing;
       _processingState = state.processingState;
-      _reportProgressDebug('A', 'player state', {
-        'playing': state.playing,
-        'processingState': state.processingState.name,
-        'positionMs': _currentPosition.inMilliseconds,
-        'durationMs': _totalDuration.inMilliseconds
-      });
       if (state.processingState == ProcessingState.completed) {
         _handleTrackEnded();
       }
@@ -273,8 +256,11 @@ class AudioPlayerManager extends ChangeNotifier {
       _currentLyrics = [];
       _currentLyricIndex = 0;
       final song = currentSong;
-      if (_showLyrics && song != null) {
-        MusicApiService.getLyrics(song.hash).then((lyrics) {
+      if (song != null) {
+        // 始终加载歌词（沉浸式页面与右侧栏歌词面板都需要）。
+        MusicApiService.getLyrics(song.hash,
+                songName: song.songName, artist: song.authorName)
+            .then((lyrics) {
           if (currentSong?.hash != song.hash) return;
           _currentLyrics = lyrics;
           notifyListeners();
@@ -289,16 +275,12 @@ class AudioPlayerManager extends ChangeNotifier {
     // 监听播放进度
     _player.positionStream.listen((position) {
       _currentPosition = position;
+      final prevLyricIndex = _currentLyricIndex;
       _updateLyricIndex(position);
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if (now - _debugLastPositionReportMs >= 1000) {
-        _debugLastPositionReportMs = now;
-        _reportProgressDebug('A', 'position update', {
-          'positionMs': position.inMilliseconds,
-          'isPlaying': _isPlaying,
-          'processingState': _processingState.name,
-          'durationMs': _totalDuration.inMilliseconds
-        });
+      // 仅在歌词行切换时触发主通知（低频），歌词页重绘；
+      // 逐字高亮与进度条由 progressNotifier 独立驱动，避免高频重建。
+      if (_currentLyricIndex != prevLyricIndex) {
+        notifyListeners();
       }
       _scheduleProgressNotification();
     });
@@ -318,20 +300,23 @@ class AudioPlayerManager extends ChangeNotifier {
   }
 
   void _scheduleProgressNotification() {
-    const interval = Duration(milliseconds: 100);
+    // 250ms 节流发送进度通知。不依赖 _isPlaying 判断：
+    // just_audio 在缓冲/gapless 预加载等阶段 playing 状态可能短暂不一致，
+    // 而进度条需要始终反映当前位置。
+    const interval = Duration(milliseconds: _progressNotifyIntervalMs);
     final elapsed = DateTime.now().difference(_lastProgressNotification);
     if (elapsed >= interval) {
       _progressNotificationTimer?.cancel();
       _progressNotificationTimer = null;
       _lastProgressNotification = DateTime.now();
-      notifyListeners();
+      progressNotifier.notifyListeners();
       return;
     }
     if (_progressNotificationTimer != null) return;
     _progressNotificationTimer = Timer(interval - elapsed, () {
       _progressNotificationTimer = null;
       _lastProgressNotification = DateTime.now();
-      notifyListeners();
+      progressNotifier.notifyListeners();
     });
   }
 
@@ -465,7 +450,7 @@ class AudioPlayerManager extends ChangeNotifier {
           // Fall back to the next sidecar or embedded lyrics.
         }
       }
-      if (_showLyrics && lyrics.isNotEmpty) {
+      if (lyrics.isNotEmpty) {
         _currentLyrics = MusicApiService.parseLyrics(lyrics);
         if (_currentLyrics.isEmpty) {
           _currentLyrics = lyrics
@@ -501,15 +486,17 @@ class AudioPlayerManager extends ChangeNotifier {
       return;
     }
 
-    // 1. 获取在线音频地址
+    // 1. 获取在线音频地址 + 歌词（与原版 Go 的 GetSongUrl 一致：
+    //    响应中直接携带歌词，避免单独调用 /search/lyric）。
     final quality = await _effectiveStreamingQuality();
     print('播放调试: 开始在线播放 ${song.songName} quality=$quality');
-    final urls = await MusicApiService.getPlayUrls(
+    final playResult = await MusicApiService.getPlayUrlsWithLyrics(
       song.hash,
       songName: song.songName,
       artist: song.authorName,
       quality: quality,
     );
+    final urls = playResult.urls;
     print('播放调试: 获取到 ${urls.length} 个URL');
     for (var i = 0; i < urls.length; i++) {
       print('播放调试: url[$i]=${urls[i]}');
@@ -522,9 +509,22 @@ class AudioPlayerManager extends ChangeNotifier {
       return;
     }
 
-    // 2. 加载歌词
-    if (_showLyrics) {
-      MusicApiService.getLyrics(song.hash).then((lyrics) {
+    // 2. 加载歌词：优先使用播放地址响应中的歌词；为空时兜底独立接口。
+    if (playResult.lyrics.trim().isNotEmpty) {
+      _currentLyrics = MusicApiService.parseLyrics(playResult.lyrics);
+      if (_currentLyrics.isEmpty) {
+        _currentLyrics = playResult.lyrics
+            .split(RegExp(r'\r?\n'))
+            .where((line) => line.trim().isNotEmpty)
+            .map((line) =>
+                LyricLine(time: Duration.zero, text: line.trim()))
+            .toList();
+      }
+      notifyListeners();
+    } else {
+      MusicApiService.getLyrics(song.hash,
+              songName: song.songName, artist: song.authorName)
+          .then((lyrics) {
         if (requestId != _playRequestId) return;
         _currentLyrics = lyrics;
         notifyListeners();
@@ -532,33 +532,42 @@ class AudioPlayerManager extends ChangeNotifier {
     }
 
     // 3. 与 Go 原版一致：优先同步缓存整首歌曲，再播放本地文件。
+    //    开启开关可在设置关闭整首缓存而直接流式播放。
     File? audioFile;
-    try {
-      final cache = await MediaCacheService.instance;
-      for (var i = 0; i < urls.length; i++) {
-        try {
-          print('播放调试: 获取本地音频 (${i + 1}/${urls.length})');
-          audioFile = await cache.getAudio(
-            hash: song.hash,
-            quality: quality,
-            url: urls[i],
-          );
-          break;
-        } catch (e) {
-          print('播放调试: 缓存音频失败(${i + 1}/${urls.length}): $e');
+    if (_cacheBeforePlay) {
+      try {
+        final cache = await MediaCacheService.instance;
+        for (var i = 0; i < urls.length; i++) {
+          try {
+            print('播放调试: 获取本地音频 (${i + 1}/${urls.length})');
+            audioFile = await cache.getAudio(
+              hash: song.hash,
+              quality: quality,
+              url: urls[i],
+            );
+            break;
+          } catch (e) {
+            print('播放调试: 缓存音频失败(${i + 1}/${urls.length}): $e');
+          }
         }
+      } catch (e) {
+        print('播放调试: 初始化音频缓存失败: $e');
       }
-    } catch (e) {
-      print('播放调试: 初始化音频缓存失败: $e');
+    } else {
+      print('播放调试: 设置已关闭整首缓存，直接流式播放');
     }
 
     if (audioFile != null && requestId == _playRequestId) {
+      var localOk = false;
       try {
         print('播放调试: 本地音频已就绪 ${audioFile.path}');
         _clearGaplessState();
         await _player.pause();
+        // Windows 上 just_audio 加载本地文件可能较慢或卡住（Media
+        // Foundation 异步初始化），用 6 秒超时避免永久阻塞；
+        // 超时/失败后重置播放器并回退远程播放。
         await _player.setFilePath(audioFile.path).timeout(
-              const Duration(seconds: 5),
+              const Duration(seconds: 6),
               onTimeout: () => throw TimeoutException('本地音频加载超时'),
             );
         if (requestId != _playRequestId) return;
@@ -567,9 +576,18 @@ class AudioPlayerManager extends ChangeNotifier {
         print('播放调试: 本地音频播放已启动');
         await MusicApiService.addPlayHistory(song);
         _prepareGaplessNext(requestId);
-        return;
+        localOk = true;
       } catch (e) {
         print('播放调试: 本地播放器启动失败: $e');
+      }
+      if (!localOk) {
+        // 超时/失败后重置播放器状态，避免后续 setAudioSource 卡死。
+        try {
+          await _player.stop();
+          _clearGaplessState();
+        } catch (_) {}
+      } else {
+        return;
       }
     }
 
@@ -583,14 +601,12 @@ class AudioPlayerManager extends ChangeNotifier {
       try {
         print('播放调试: 回退远程音频 (${i + 1}/${urls.length})');
         _clearGaplessState();
-        await _player
-            .setAudioSource(
-              AudioSource.uri(Uri.parse(urls[i]), headers: headers),
-            )
-            .timeout(
-              const Duration(seconds: 5),
-              onTimeout: () => throw TimeoutException('远程音频加载超时'),
-            );
+        await _player.setAudioSource(
+          AudioSource.uri(Uri.parse(urls[i]), headers: headers),
+        ).timeout(
+          const Duration(seconds: 8),
+          onTimeout: () => throw TimeoutException('远程音频加载超时'),
+        );
         if (requestId != _playRequestId) return;
         await _player.play();
         print('播放调试: 远程音频播放已启动');
@@ -599,6 +615,9 @@ class AudioPlayerManager extends ChangeNotifier {
         return;
       } catch (e) {
         print('播放调试: 远程音频失败(${i + 1}/${urls.length}): $e');
+        try {
+          await _player.stop();
+        } catch (_) {}
       }
     }
 
@@ -925,6 +944,7 @@ class AudioPlayerManager extends ChangeNotifier {
           .then((prefs) => prefs.setDouble('playback_volume', _volume));
     }
     _player.dispose();
+    progressNotifier.dispose();
     super.dispose();
   }
 }

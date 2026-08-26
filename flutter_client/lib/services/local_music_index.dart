@@ -88,10 +88,11 @@ class LocalMusicIndex {
 
     final hashToPath = <String, String>{};
     for (final entry in current.entries) {
-      hashToPath.putIfAbsent(
-        entry.value['contentId'] as String,
-        () => entry.key,
-      );
+      final contentId = entry.value['contentId'];
+      // 兼容历史缓存中 contentId 为空的情况，避免强转崩溃
+      if (contentId is String && contentId.isNotEmpty) {
+        hashToPath.putIfAbsent(contentId, () => entry.key);
+      }
     }
     await _save(current, hashToPath);
     await _removeUnusedCovers(current, coverDirectory);

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/music_api_service.dart';
 import '../theme/app_theme.dart';
+import 'app_toast.dart';
 
 class AuthDialog extends StatefulWidget {
   final VoidCallback onLoginChanged;
@@ -310,13 +311,7 @@ class _AuthDialogState extends State<AuthDialog> {
 
   void _showToast(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    AppToast.show(context, msg);
   }
 
   @override

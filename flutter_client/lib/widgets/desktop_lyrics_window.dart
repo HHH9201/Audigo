@@ -79,12 +79,20 @@ class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
               borderRadius: BorderRadius.circular(6),
             ),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _KaraokeLine(
-                  snapshot: _snapshot,
-                  fallback: line,
-                  fontSize: _fontSize,
+                // FittedBox 缩放歌词行，避免嵌入任务栏后高度不足导致溢出
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.center,
+                    child: _KaraokeLine(
+                      snapshot: _snapshot,
+                      fallback: line,
+                      fontSize: _fontSize,
+                    ),
+                  ),
                 ),
                 if (!Platform.isWindows && _snapshot.nextLine.isNotEmpty) ...[
                   const SizedBox(height: 3),

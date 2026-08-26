@@ -101,7 +101,7 @@ class MetingApiService {
   }
 
   /// 获取歌词（裸 LRC 文本）。
-  static Future<String?> getLyrics(String id) async {
+  static Future<String?> getLyrics(String id, {String server = 'netease'}) async {
     if (id.trim().isEmpty) return null;
     try {
       final resp = await _dio.get(baseUrl, queryParameters: {
@@ -112,7 +112,30 @@ class MetingApiService {
       final data = resp.data;
       if (data is String && data.trim().isNotEmpty) return data.trim();
     } catch (e) {
-      print('Meting 歌词失败: id=$id error=$e');
+      print('Meting 歌词失败: server=$server id=$id error=$e');
+    }
+    return null;
+  }
+
+  /// 酷狗歌词兜底：Meting 的 kugou 源直接以歌曲 hash（小写）作为 id，
+  /// 因此无需搜索即可按 hash 直取歌词。
+  static Future<String?> getKugouLyricsByHash(String hash) {
+    if (hash.trim().isEmpty) return Future.value(null);
+    return getLyrics(hash.trim().toLowerCase(), server: 'kugou');
+  }
+
+  /// 网易云歌词兜底：按「歌名 + 歌手」搜索，歌手匹配过滤后，
+  /// 返回第一个能拿到歌词的结果的 LRC 文本。
+  static Future<String?> getLyricsBySearch(String songName, String artist) async {
+    final name = songName.trim();
+    if (name.isEmpty) return null;
+
+    final results =
+        await search(artist.trim().isNotEmpty ? '$name $artist' : name);
+    for (final song in results) {
+      if (!_artistMatches(song.artist, artist)) continue;
+      final lyrics = await getLyrics(song.id);
+      if (lyrics != null && lyrics.isNotEmpty) return lyrics;
     }
     return null;
   }

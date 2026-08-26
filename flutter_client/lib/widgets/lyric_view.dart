@@ -32,6 +32,9 @@ class _LyricViewState extends State<LyricView>
   String _currentTimeStr = '';
   bool _showControls = true;
   int _lastActiveIndex = -1;
+  // 歌词行实际高度（含上下 padding），由 _buildLyrics 按当前布局计算，
+  // 滚动定位依赖该值与 ListView.itemExtent 完全一致，保证当前句始终居中。
+  double _itemExtent = 66;
 
   @override
   void initState() {
@@ -92,10 +95,10 @@ class _LyricViewState extends State<LyricView>
     });
   }
 
+  /// 滚动使指定歌词行居中：目标偏移 = 行号 × 行高（itemExtent 固定时精确）。
   void _scrollToActive(int activeIndex) {
     if (!_scrollController.hasClients || activeIndex < 0) return;
-    final viewportCenter = _scrollController.position.viewportDimension / 2;
-    final target = activeIndex * 64.0 - viewportCenter + 32;
+    final target = activeIndex * _itemExtent;
     _scrollController.animateTo(
       target.clamp(0.0, _scrollController.position.maxScrollExtent),
       duration: const Duration(milliseconds: 350),
@@ -141,12 +144,6 @@ class _LyricViewState extends State<LyricView>
         if (mounted) _scrollToActive(activeIndex);
       });
     }
-
-    final currentSeconds = player.currentPosition.inMilliseconds / 1000.0;
-    final totalSeconds = player.totalDuration.inMilliseconds > 0
-        ? player.totalDuration.inMilliseconds / 1000.0
-        : 1.0;
-    final sliderValue = currentSeconds.clamp(0.0, totalSeconds);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
@@ -273,8 +270,6 @@ class _LyricViewState extends State<LyricView>
                 isFav,
                 isRandom,
                 repeatMode,
-                sliderValue,
-                totalSeconds,
               ),
             ],
           ),
@@ -436,11 +431,15 @@ class _LyricViewState extends State<LyricView>
       );
     }
 
+    // 行高 = 垂直 padding(12*2) + 字号 × 行高(1.35)，与 itemExtent 严格一致
+    _itemExtent = ((compact ? 23 : 31) * 1.35 + 24).ceilToDouble();
+
     return LayoutBuilder(
       builder: (context, constraints) => ListView.builder(
         controller: _scrollController,
+        itemExtent: _itemExtent,
         padding: EdgeInsets.symmetric(
-          vertical: math.max(0, constraints.maxHeight / 2 - 36),
+          vertical: math.max(0, constraints.maxHeight / 2 - _itemExtent / 2),
           horizontal: 12,
         ),
         itemCount: lyricCount,
@@ -509,8 +508,6 @@ class _LyricViewState extends State<LyricView>
     bool isFav,
     bool isRandom,
     RepeatMode repeatMode,
-    double sliderValue,
-    double totalSeconds,
   ) {
     final song = player.currentSong;
     return Positioned.fill(
@@ -521,68 +518,6 @@ class _LyricViewState extends State<LyricView>
           duration: const Duration(milliseconds: 350),
           child: Stack(
             children: [
-              Positioned(
-                top: 22,
-                right: 24,
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(
-                        Icons.close_fullscreen_rounded,
-                        color: Colors.white70,
-                      ),
-                      tooltip: '退出沉浸式播放',
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded,
-                          color: Colors.white70),
-                      tooltip: '关闭',
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
-                ),
-              ),
-              Positioned(
-                left: 20,
-                top: 100,
-                bottom: 130,
-                child: SizedBox(
-                  width: 32,
-                  child: Column(
-                    children: [
-                      Icon(
-                        player.volume == 0
-                            ? Icons.volume_off_rounded
-                            : Icons.volume_up_rounded,
-                        color: Colors.white70,
-                        size: 20,
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: RotatedBox(
-                          quarterTurns: 3,
-                          child: SliderTheme(
-                            data: SliderThemeData(
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 5,
-                              ),
-                              activeTrackColor: AppTheme.accentOrange,
-                              inactiveTrackColor: Colors.white24,
-                              thumbColor: Colors.white,
-                            ),
-                            child: Slider(
-                              value: player.volume,
-                              onChanged: player.setVolume,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
               Positioned(
                 left: 0,
                 right: 0,
@@ -602,59 +537,7 @@ class _LyricViewState extends State<LyricView>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(
-                        children: [
-                          SizedBox(
-                            width: 42,
-                            child: Text(
-                              _formatDuration(player.currentPosition),
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.white70,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: SliderTheme(
-                              data: SliderThemeData(
-                                trackHeight: 4,
-                                thumbShape: const RoundSliderThumbShape(
-                                  enabledThumbRadius: 6,
-                                ),
-                                overlayShape: const RoundSliderOverlayShape(
-                                  overlayRadius: 12,
-                                ),
-                                activeTrackColor: AppTheme.accentOrange,
-                                inactiveTrackColor: Colors.white24,
-                                thumbColor: Colors.white,
-                              ),
-                              child: Slider(
-                                value: sliderValue,
-                                min: 0,
-                                max: totalSeconds,
-                                onChanged: (value) => player.seek(
-                                  Duration(
-                                    milliseconds: (value * 1000).round(),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          SizedBox(
-                            width: 42,
-                            child: Text(
-                              _formatDuration(player.totalDuration),
-                              textAlign: TextAlign.end,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.white70,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                      _buildProgressRow(player),
                       const SizedBox(height: 4),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -731,10 +614,92 @@ class _LyricViewState extends State<LyricView>
                   ),
                 ),
               ),
+              // 退出沉浸式播放：绘制在控制条最上层（可点击），
+              // 位于底部控制条同一行、右侧 20px（与底栏"沉浸式播放"入口按钮对齐）
+              Positioned(
+                right: 20,
+                bottom: 19,
+                child: IconButton(
+                  icon: const Icon(
+                    Icons.close_fullscreen_rounded,
+                    color: Colors.white70,
+                  ),
+                  tooltip: '退出沉浸式播放',
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  /// 进度条行：独立监听 progressNotifier（250ms），
+  /// 避免整个控制层随进度高频重建。
+  Widget _buildProgressRow(AudioPlayerManager player) {
+    return AnimatedBuilder(
+      animation: player.progressNotifier,
+      builder: (context, _) {
+        final currentSeconds = player.currentPosition.inMilliseconds / 1000.0;
+        final totalSeconds = player.totalDuration.inMilliseconds > 0
+            ? player.totalDuration.inMilliseconds / 1000.0
+            : 1.0;
+        final sliderValue = currentSeconds.clamp(0.0, totalSeconds);
+        return Row(
+          children: [
+            SizedBox(
+              width: 42,
+              child: Text(
+                _formatDuration(player.currentPosition),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SliderTheme(
+                data: SliderThemeData(
+                  trackHeight: 4,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 6,
+                  ),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 12,
+                  ),
+                  activeTrackColor: AppTheme.accentOrange,
+                  inactiveTrackColor: Colors.white24,
+                  thumbColor: Colors.white,
+                ),
+                child: Slider(
+                  value: sliderValue,
+                  min: 0,
+                  max: totalSeconds,
+                  onChanged: (value) => player.seek(
+                    Duration(
+                      milliseconds: (value * 1000).round(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 42,
+              child: Text(
+                _formatDuration(player.totalDuration),
+                textAlign: TextAlign.end,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 

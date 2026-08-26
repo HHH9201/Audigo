@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
@@ -19,6 +20,8 @@ import 'widgets/desktop_lyrics_window.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 初始化 libmpv 播放引擎（just_audio 的 Windows/Linux 平台实现）。
+  JustAudioMediaKit.ensureInitialized();
   if (DesktopLifecycleManager.isSupported) {
     final controller = await WindowController.fromCurrentEngine();
     if (controller.arguments == DesktopLyricsManager.windowArgument) {

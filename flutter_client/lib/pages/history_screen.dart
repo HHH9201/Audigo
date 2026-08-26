@@ -5,6 +5,7 @@ import '../models/play_history.dart';
 import '../services/audio_player_manager.dart';
 import '../services/music_api_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_toast.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -44,9 +45,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final history = await MusicApiService.clearPlayHistory();
     if (!mounted) return;
     setState(() => _history = history);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('历史记录已清空')),
-    );
+    AppToast.show(context, '历史记录已清空');
   }
 
   @override

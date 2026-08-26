@@ -184,7 +184,8 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
 
   @override
   void onWindowMinimize() {
-    hideToTray();
+    // 不隐藏到托盘：让最小化按钮正常最小化窗口，
+    // 避免窗口隐藏后无法从任务栏/托盘找回（托盘图标异常时窗口会“消失”）。
   }
 
   @override

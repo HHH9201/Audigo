@@ -4393,3 +4393,43 @@ h1 {
 }
 
 /* PC专用版本 - 移除了移动设备响应式布局 */
+
+/* ==================== 统一气泡通知 (Toast) ==================== */
+/* 统一配色；垂直对齐侧栏"音乐库"标题所在行（标题栏下沿 7vh），水平贴最右侧，
+   同时不遮挡上方右上角的关闭/最小化/最大化按钮 */
+.toast {
+    position: fixed;
+    top: 7vh;
+    right: 0;
+    z-index: 21000;             /* 高于标题栏 z-index 1000 */
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 420px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-md);
+    opacity: 1;
+    transform: translateX(0);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* 类型标识圆点 */
+.toast::before {
+    content: "";
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-color);
+}
+
+.toast-success::before { background: #4caf7d; }
+.toast-error::before   { background: #ef6a80; }
+.toast-warning::before { background: #f0a63b; }
+.toast-info::before    { background: #46a8f0; }

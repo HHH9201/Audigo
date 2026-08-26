@@ -16,8 +16,10 @@ dependencies:
   dio: ^5.7.0
   # 音频播放核心与后台播控
   just_audio: ^0.9.40
-  just_audio_windows:
-    path: third_party/just_audio_windows
+  # Windows 播放引擎：just_audio_windows（Media Foundation）在加载本地/远程
+  # 音频时 MediaOpened 事件无法送达 Dart 侧导致播放卡死，改用 libmpv 引擎。
+  just_audio_media_kit: ^2.1.0
+  media_kit_libs_windows_audio: ^1.0.9
   audio_service: ^0.18.17
   # 本地持久化 (Cookie、播放历史、收藏)
   shared_preferences: ^2.3.3

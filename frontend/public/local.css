@@ -1124,7 +1124,7 @@
 }
 
 .folder-content.expanded {
-    max-height: 2000px;
+    max-height: 100000px;
     opacity: 1;
 }
 
@@ -1160,6 +1160,44 @@
 
 .folder-song-item:last-child {
     border-bottom: none;
+}
+
+/* 文件夹内分页控件 */
+.folder-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-light);
+}
+
+.folder-page-btn {
+    padding: 6px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.folder-page-btn:hover:not(:disabled) {
+    background: var(--accent-color);
+    color: var(--text-inverse);
+    border-color: var(--accent-color);
+}
+
+.folder-page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.folder-page-info {
+    font-size: 13px;
+    color: var(--text-secondary);
 }
 
 /* 响应式设计 */

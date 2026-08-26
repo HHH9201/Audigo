@@ -13,6 +13,7 @@ import '../models/song.dart';
 import '../services/audio_player_manager.dart';
 import '../services/local_music_index.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_toast.dart';
 
 const localAudioExtensions = {
   '.mp3',
@@ -203,15 +204,11 @@ class _LocalMusicScreenState extends State<LocalMusicScreen> {
     final directoryExists = await Directory(path).exists();
     if (!mounted) return;
     if (!directoryExists) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('文件夹不存在，请重新选择')),
-      );
+      AppToast.show(context, '文件夹不存在，请重新选择');
       return;
     }
     if (_folderPaths.contains(path)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('该文件夹已添加')),
-      );
+      AppToast.show(context, '该文件夹已添加');
       return;
     }
     setState(() => _folderPaths.add(path));
@@ -278,9 +275,7 @@ class _LocalMusicScreenState extends State<LocalMusicScreen> {
       _isScanning = false;
     });
     if (showResult) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('扫描完成，共发现 ${songs.length} 首歌曲')),
-      );
+      AppToast.show(context, '扫描完成，共发现 ${songs.length} 首歌曲');
     }
   }
 

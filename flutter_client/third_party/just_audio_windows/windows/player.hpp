@@ -1,11 +1,13 @@
 #pragma comment(lib, "windowsapp")
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 // This must be included before many other Windows headers.
 #include <windows.h>
@@ -131,6 +133,11 @@ private:
   bool disposed_ = false;
   bool source_assigned_ = false;
   bool pending_play_ = false;
+  // 播放期间位置上报定时器：Media Foundation 只在状态变化时回调
+  // PlaybackStateChanged，播放中位置不会自动上报，导致 Dart 侧进度条
+  // 收不到 positionStream 更新。此定时器在播放时每 250ms 广播一次位置。
+  std::atomic<bool> position_timer_running_{false};
+  std::thread position_timer_thread_;
   std::function<void(std::function<void()>)> post_to_platform_thread_;
   std::shared_ptr<CallbackState> callback_state_ =
     std::make_shared<CallbackState>();
@@ -138,6 +145,7 @@ private:
   void Dispose() {
     if (disposed_) return;
     disposed_ = true;
+    stopPositionTimer();
     {
       std::lock_guard<std::mutex> lock(callback_state_->mutex);
       callback_state_->player = nullptr;
@@ -208,15 +216,18 @@ public:
 
     media_opened_token_ = mediaPlayer.MediaOpened(
       [weak_state, post = post_to_platform_thread_](auto, const auto&) {
+        std::cerr << "[just_audio_windows] MediaOpened fired" << std::endl;
         post([weak_state]() {
           auto state = weak_state.lock();
           if (!state) return;
           std::lock_guard<std::mutex> lock(state->mutex);
           if (!state->player) return;
+          std::cerr << "[just_audio_windows] MediaOpened broadcastState" << std::endl;
           state->player->broadcastState();
           if (state->player->pending_play_) {
             state->player->pending_play_ = false;
             state->player->mediaPlayer.Play();
+            state->player->startPositionTimer();
           }
         });
       });
@@ -227,6 +238,8 @@ public:
         auto, const Playback::MediaPlayerFailedEventArgs& args) {
         std::string error_message = winrt::to_string(args.ErrorMessage());
         auto error = args.Error();
+        std::cerr << "[just_audio_windows] MediaFailed: " << error_message
+                  << " error=" << static_cast<int>(error) << std::endl;
         post([weak_state, error, error_message = std::move(error_message)]() {
           auto state = weak_state.lock();
           if (!state) return;
@@ -301,6 +314,7 @@ public:
       if (!disposed_) {
         if (source_assigned_) {
           mediaPlayer.Play();
+          startPositionTimer();
         } else {
           pending_play_ = true;
         }
@@ -309,6 +323,12 @@ public:
     } else if (method_call.method_name().compare("pause") == 0) {
       if (!disposed_) {
         mediaPlayer.Pause();
+        stopPositionTimer();
+      }
+      result->Success(flutter::EncodableMap());
+    } else if (method_call.method_name().compare("stop") == 0) {
+      if (!disposed_) {
+        stopPositionTimer();
       }
       result->Success(flutter::EncodableMap());
     } else if (method_call.method_name().compare("setVolume") == 0) {
@@ -486,6 +506,7 @@ public:
     items.Clear(); // Always clear the list since we are resetting
 
     const std::string* type = std::get_if<std::string>(ValueOrNull(source, "type"));
+    std::cerr << "[just_audio_windows] loadSource type=" << (type ? *type : "null") << std::endl;
 
     if (type->compare("concatenating") == 0) {
       const auto* children = std::get_if<flutter::EncodableList>(ValueOrNull(source, "children"));
@@ -498,7 +519,13 @@ public:
 
       mediaPlayer.Source(mediaPlaybackList.as<Playback::IMediaPlaybackSource>());
     } else {
-      mediaPlayer.Source(createMediaPlaybackItem(source).as<Playback::IMediaPlaybackSource>());
+      try {
+        auto item = createMediaPlaybackItem(source);
+        mediaPlayer.Source(item.as<Playback::IMediaPlaybackSource>());
+        std::cerr << "[just_audio_windows] Source set OK" << std::endl;
+      } catch (const std::exception& e) {
+        std::cerr << "[just_audio_windows] Source set FAILED: " << e.what() << std::endl;
+      }
     }
     source_assigned_ = true;
     if (pending_play_) {
@@ -793,6 +820,51 @@ public:
       setShuffleOrder(*child);
     } else {
       // can not shuffle a single-audio media source
+    }
+  }
+
+  // ==================== 播放期间位置上报定时器 ====================
+  // Media Foundation 仅在播放状态变化时触发 PlaybackStateChanged，
+  // 播放过程中 positionStream 不会自动更新。此定时器在播放期间
+  // 每 250ms 广播一次位置/进度事件，驱动 Dart 侧进度条与歌词滚动。
+
+  void startPositionTimer() {
+    if (position_timer_running_.load()) return;
+    if (position_timer_thread_.joinable()) {
+      position_timer_thread_.join();
+    }
+    position_timer_running_.store(true);
+    std::weak_ptr<CallbackState> weak_state = callback_state_;
+    auto post = post_to_platform_thread_;
+    position_timer_thread_ = std::thread([weak_state, post]() {
+      for (;;) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        auto state = weak_state.lock();
+        if (!state) break;
+        auto* p = state->player;
+        if (!p) break;
+        if (p->disposed_) break;
+        if (!p->position_timer_running_.load()) break;
+        // 每 250ms 广播一次位置/进度（Dart 侧 progressNotifier 已节流，
+        // 暂停时多一次事件无副作用，避免在 lambda 中依赖 winrt 状态查询）。
+        std::weak_ptr<CallbackState> inner_weak = weak_state;
+        post([inner_weak]() {
+          auto inner_state = inner_weak.lock();
+          if (!inner_state) return;
+          std::lock_guard<std::mutex> guard(inner_state->mutex);
+          if (inner_state->player) inner_state->player->broadcastState();
+        });
+      }
+    });
+  }
+
+  void stopPositionTimer() {
+    position_timer_running_.store(false);
+    if (position_timer_thread_.joinable()) {
+      // 先让定时器线程观察到 false 并退出（最多 250ms 一轮），
+      // 避免线程正 post 到平台线程时 join 造成死锁。
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      position_timer_thread_.join();
     }
   }
 

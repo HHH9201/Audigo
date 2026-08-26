@@ -3269,21 +3269,11 @@ function showToast(message, type = 'info') {
     toast.className = `toast toast-${type}`;
     toast.textContent = message;
 
-    // 添加样式
+    // 切换主题等动画效果（配色与定位由 .toast 样式统一控制）
     toast.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
-        color: white;
-        padding: 12px 24px;
-        border-radius: 4px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-        z-index: 10000;
-        font-size: 14px;
         opacity: 0;
         transform: translateX(100%);
-        transition: all 0.3s ease;
+        transition: opacity 0.3s ease, transform 0.3s ease;
     `;
 
     // 添加到页面

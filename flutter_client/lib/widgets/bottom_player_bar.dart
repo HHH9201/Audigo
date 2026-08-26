@@ -1,5 +1,3 @@
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart' hide RepeatMode;
@@ -25,32 +23,6 @@ class BottomPlayerBar extends StatefulWidget {
 
 class _BottomPlayerBarState extends State<BottomPlayerBar> {
   bool _showVolumePopover = false;
-  int _debugLastBuildReportMs = -1000;
-
-  void _reportProgressDebug(AudioPlayerManager player) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _debugLastBuildReportMs < 1000) return;
-    _debugLastBuildReportMs = now;
-    unawaited(HttpClient()
-        .postUrl(Uri.parse('http://127.0.0.1:7777/event'))
-        .then<void>((request) async {
-      request.headers.contentType = ContentType.json;
-      request.write(jsonEncode({
-        'sessionId': 'progress-bar-stale',
-        'runId': 'pre-fix',
-        'hypothesisId': 'B',
-        'location': 'bottom_player_bar.dart',
-        'msg': '[DEBUG] progress UI build',
-        'data': {
-          'positionMs': player.currentPosition.inMilliseconds,
-          'durationMs': player.totalDuration.inMilliseconds,
-          'isPlaying': player.isPlaying
-        },
-        'ts': DateTime.now().millisecondsSinceEpoch
-      }));
-      await request.close();
-    }, onError: (_, __) {}));
-  }
 
   String _formatDuration(Duration duration) {
     final minutes = duration.inMinutes.remainder(60).toString().padLeft(1, '0');
@@ -58,21 +30,88 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
     return '$minutes:$seconds';
   }
 
+  /// 进度行（当前时间 + 滑块 + 总时长）：独立监听 progressNotifier（500ms），
+  /// 不随主 build 重建，保证进度条与时间文本流畅更新且不影响整体帧率。
+  Widget _buildProgressRow(AudioPlayerManager player) {
+    return SizedBox(
+      height: 24,
+      child: AnimatedBuilder(
+        animation: player.progressNotifier,
+        builder: (context, _) {
+          final currentSeconds = player.currentPosition.inSeconds.toDouble();
+          final totalSeconds = player.totalDuration.inSeconds > 0
+              ? player.totalDuration.inSeconds.toDouble()
+              : 1.0;
+          final sliderVal = currentSeconds.clamp(0.0, totalSeconds);
+          return Row(
+            children: [
+              SizedBox(
+                width: 36,
+                child: Text(
+                  _formatDuration(player.currentPosition),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SizedBox(
+                  height: 16,
+                  child: SliderTheme(
+                    data: SliderThemeData(
+                      trackHeight: 3,
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 6,
+                      ),
+                      overlayShape: const RoundSliderOverlayShape(
+                        overlayRadius: 10,
+                      ),
+                      activeTrackColor: AppTheme.accentOrange,
+                      inactiveTrackColor: AppTheme.borderWarm,
+                      thumbColor: AppTheme.accentOrange,
+                      overlayColor: AppTheme.accentOrange.withOpacity(0.2),
+                    ),
+                    child: Slider(
+                      value: sliderVal,
+                      min: 0.0,
+                      max: totalSeconds,
+                      onChanged: (value) => player.seek(
+                        Duration(milliseconds: (value * 1000).round()),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 36,
+                child: Text(
+                  _formatDuration(player.totalDuration),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final player = context.watch<AudioPlayerManager>();
-    _reportProgressDebug(player);
     final song = player.currentSong;
     final isFav = song != null && player.isFavorite(song.hash);
 
     final isRandom = player.shuffleMode;
     final repeatMode = player.repeatMode;
-
-    final currentSeconds = player.currentPosition.inSeconds.toDouble();
-    final totalSeconds = player.totalDuration.inSeconds > 0
-        ? player.totalDuration.inSeconds.toDouble()
-        : 1.0;
-    final sliderVal = currentSeconds.clamp(0.0, totalSeconds);
 
     return Container(
       height: 80,
@@ -96,20 +135,18 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
             width: 240,
             child: Row(
               children: [
-                // 封面
+                // 封面（点击进入沉浸式歌词页，始终可用）
                 GestureDetector(
-                  onTap: player.showLyrics
-                      ? () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => LyricView(
-                                onExit: () => Navigator.pop(context),
-                              ),
-                            ),
-                          );
-                        }
-                      : null,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => LyricView(
+                          onExit: () => Navigator.pop(context),
+                        ),
+                      ),
+                    );
+                  },
                   child: Container(
                     width: 56,
                     height: 56,
@@ -283,66 +320,7 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
                     ),
                   ],
                 ),
-                SizedBox(
-                  height: 24,
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 36,
-                        child: Text(
-                          _formatDuration(player.currentPosition),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: SizedBox(
-                          height: 16,
-                          child: SliderTheme(
-                            data: SliderThemeData(
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 6,
-                              ),
-                              overlayShape: const RoundSliderOverlayShape(
-                                overlayRadius: 10,
-                              ),
-                              activeTrackColor: AppTheme.accentOrange,
-                              inactiveTrackColor: AppTheme.borderWarm,
-                              thumbColor: AppTheme.accentOrange,
-                              overlayColor:
-                                  AppTheme.accentOrange.withOpacity(0.2),
-                            ),
-                            child: Slider(
-                              value: sliderVal,
-                              min: 0.0,
-                              max: totalSeconds,
-                              onChanged: (value) => player.seek(
-                                Duration(milliseconds: (value * 1000).round()),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 36,
-                        child: Text(
-                          _formatDuration(player.totalDuration),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                _buildProgressRow(player),
               ],
             ),
           ),
@@ -425,10 +403,13 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
                   ],
                 ),
 
-                // 歌词按钮
+                // 歌词按钮（图标改为"词"字）
                 IconButton(
-                  icon: Icon(Icons.notes,
-                      size: 20, color: AppTheme.textSecondary),
+                  icon: Text('词',
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.textSecondary)),
                   tooltip: "歌词",
                   onPressed: player.showLyrics ? widget.onToggleLyrics : null,
                 ),
@@ -441,23 +422,21 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
                   onPressed: widget.onTogglePlaylist,
                 ),
 
-                // 沉浸式全屏播放
+                // 沉浸式全屏播放（始终可用，不依赖"显示歌词"开关）
                 IconButton(
                   icon: Icon(Icons.fullscreen,
                       size: 22, color: AppTheme.textSecondary),
                   tooltip: "沉浸式播放",
-                  onPressed: player.showLyrics
-                      ? () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => LyricView(
-                                onExit: () => Navigator.pop(context),
-                              ),
-                            ),
-                          );
-                        }
-                      : null,
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => LyricView(
+                          onExit: () => Navigator.pop(context),
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),

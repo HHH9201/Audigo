@@ -112,6 +112,8 @@ class MediaCacheService {
       }
       await temporary.rename(target.path);
       await _writeMetadata(metadata, length);
+      // 缓存写入成功后，就地清理同一首歌更低音质的重复缓存（只留最高音质）。
+      await _dedupeAudioByKey(_fileKey(hash));
       return target;
     } catch (_) {
       await _deleteIfExists(temporary);
@@ -291,5 +293,70 @@ class MediaCacheService {
     } on FileSystemException {
       // A later validation or write will surface an unusable cache path.
     }
+  }
+
+  /// 音频音质优先级：值越大音质越高。
+  static const Map<String, int> _qualityRank = {
+    '128k': 1,
+    '320k': 2,
+    'flac': 3,
+  };
+
+  /// 删除文件返回其字节数（用于统计释放空间）。
+  Future<int> _deleteWithMeta(File file) async {
+    var freed = 0;
+    try {
+      if (await file.exists()) {
+        freed += await file.length();
+        await file.delete();
+      }
+    } on FileSystemException {
+      // 删除失败由下次去重/校验兜底。
+    }
+    await _deleteIfExists(File('${file.path}.meta'));
+    return freed;
+  }
+
+  /// 针对单个 key：只保留最高音质的一份缓存，删除低音质重复与其 .meta。
+  /// 返回被释放的字节数。
+  Future<int> _dedupeAudioByKey(String key) async {
+    if (!await _audioDirectory.exists()) return 0;
+    final pattern = RegExp(
+        '^${RegExp.escape(key)}_(128k|320k|flac)\\.(mp3|flac)\$');
+    final found = <File>[];
+    var keepRank = 0;
+    for (final e in _audioDirectory.listSync()) {
+      if (e is! File) continue;
+      final name = p.basename(e.path);
+      if (name.endsWith('.meta')) continue;
+      final m = pattern.firstMatch(name);
+      if (m == null) continue;
+      found.add(e);
+      final rank = _qualityRank[m.group(1)!] ?? 0;
+      if (rank > keepRank) keepRank = rank;
+    }
+    var freed = 0;
+    for (final f in found) {
+      final m = pattern.firstMatch(p.basename(f.path));
+      final rank = _qualityRank[m!.group(1)!] ?? 0;
+      if (rank < keepRank) freed += await _deleteWithMeta(f);
+    }
+    return freed;
+  }
+
+  /// 全量去重：对缓存目录中每首歌只保留最高音质那份，释放空间。
+  Future<int> dedupeAudioCache() async {
+    if (!await _audioDirectory.exists()) return 0;
+    final keys = <String>{};
+    final pattern = RegExp(r'^(.+)_(128k|320k|flac)\.(mp3|flac)$');
+    for (final e in _audioDirectory.listSync()) {
+      final m = pattern.firstMatch(p.basename(e.path));
+      if (m != null) keys.add(m.group(1)!);
+    }
+    var freed = 0;
+    for (final key in keys) {
+      freed += await _dedupeAudioByKey(key);
+    }
+    return freed;
   }
 }

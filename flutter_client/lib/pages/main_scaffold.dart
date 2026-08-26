@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'home_screen.dart';
 import 'search_screen.dart';
+import 'artist_songs_screen.dart';
 import 'discover_screen.dart';
 import 'history_screen.dart';
 import 'local_music_screen.dart';
@@ -47,6 +48,11 @@ class _MainScaffoldState extends State<MainScaffold> {
   int _rightSidebarTab = 0; // 0: 播放列表, 1: 歌词
   bool _isLoggedIn = false;
   String? _userAvatar;
+
+  // 侧边歌词自动滚动（与沉浸式 LyricView 同套逻辑）：固定行高 + 视口居中 padding
+  final ScrollController _lyricSideController = ScrollController();
+  int _lastSideLyricIndex = -1;
+  double _sideLyricExtent = 44;
 
   @override
   void initState() {
@@ -108,6 +114,16 @@ class _MainScaffoldState extends State<MainScaffold> {
   Widget _buildCurrentPage() {
     final detail = _navigationState.detail;
     if (detail != null) {
+      if (detail.type == 'artist') {
+        return ArtistSongsScreen(
+          key: ValueKey(
+            'detail-${detail.type}-${detail.id}-${_pageVersions[_selectedIndex]}',
+          ),
+          name: detail.title,
+          coverUrl: detail.coverUrl,
+          onBack: _goBack,
+        );
+      }
       return AlbumDetailScreen(
         key: ValueKey(
           'detail-${detail.type}-${detail.id}-${_pageVersions[_selectedIndex]}',
@@ -149,6 +165,7 @@ class _MainScaffoldState extends State<MainScaffold> {
   @override
   void dispose() {
     _searchController.dispose();
+    _lyricSideController.dispose();
     super.dispose();
   }
 
@@ -657,25 +674,68 @@ class _MainScaffoldState extends State<MainScaffold> {
             style: TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
       );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-      itemCount: player.currentLyrics.length,
-      itemBuilder: (context, idx) {
-        final line = player.currentLyrics[idx];
-        final isCurrent = idx == player.currentLyricIndex;
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text(
-            line.text,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: isCurrent ? 15 : 13,
-              fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-              color: isCurrent
-                  ? AppTheme.accentOrange
-                  : AppTheme.textSecondary.withOpacity(0.7),
-            ),
+    final lyrics = player.currentLyrics;
+    final activeIndex = player.currentLyricIndex;
+
+    // 当前句变化时滚动到居中位置（参考沉浸式 LyricView）
+    if (activeIndex != _lastSideLyricIndex) {
+      _lastSideLyricIndex = activeIndex;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_lyricSideController.hasClients || activeIndex < 0) {
+          return;
+        }
+        final target = activeIndex * _sideLyricExtent;
+        _lyricSideController.animateTo(
+          target.clamp(
+            0.0,
+            _lyricSideController.position.maxScrollExtent,
           ),
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+        );
+      });
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 顶部填充半个视口，配合固定行高使当前句始终居中
+        final topPadding =
+            (constraints.maxHeight - _sideLyricExtent) / 2;
+        return ListView.builder(
+          controller: _lyricSideController,
+          padding: EdgeInsets.symmetric(vertical: topPadding > 0 ? topPadding : 0),
+          itemExtent: _sideLyricExtent,
+          itemCount: lyrics.length,
+          itemBuilder: (context, idx) {
+            final line = lyrics[idx];
+            final active = idx == activeIndex;
+            return GestureDetector(
+              onTap: () => player.seek(line.time),
+              child: Center(
+                child: AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 150),
+                  style: TextStyle(
+                    fontSize: active ? 15 : 13,
+                    fontWeight:
+                        active ? FontWeight.bold : FontWeight.normal,
+                    color: active
+                        ? AppTheme.accentOrange
+                        : AppTheme.textSecondary.withOpacity(0.7),
+                  ),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      line.text,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
     );

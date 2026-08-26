@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
@@ -12,6 +13,7 @@ import '../models/play_history.dart';
 import '../models/song.dart';
 import '../models/user_playlist.dart';
 import 'media_cache_service.dart';
+import 'meting_api_service.dart';
 
 class SearchPage<T> {
   final List<T> items;
@@ -141,11 +143,131 @@ class MusicApiService {
     return dio;
   }
 
-  // 获取本地保存的 Cookie
-  static Future<String> _getCookie() async {
+  // ==================== 设备参数管理（每客户端独立） ====================
+  //
+  // 多用户共用后端时，每个客户端必须使用自己独立的设备参数
+  // （KUGOU_API_GUID/DEV/MAC/WEBGL + dfid），否则所有用户会被酷狗识别为
+  // "同一台设备"，触发风控（20018 / 滑块验证 / 封号）。
+  //
+  // 设计：设备参数属于"客户端实例"而非"登录用户"，首次使用时生成并
+  // 独立保存（device_*），不随用户切换而变化；请求时与用户 cookie 合并携带。
+
+  static const _kDeviceGuid = 'device_guid';
+  static const _kDeviceDev = 'device_dev';
+  static const _kDeviceMac = 'device_mac';
+  static const _kDeviceWebgl = 'device_webgl';
+  static const _kDeviceMid = 'device_mid';
+  static const _kDeviceDfid = 'device_dfid';
+  static const _kDevicePlatform = 'device_platform';
+
+  static Map<String, String>? _deviceCache;
+  static String? _userCookieCache;
+
+  /// 登录/登出/导入设置后失效 cookie 缓存。
+  static void invalidateCookieCache() {
+    _userCookieCache = null;
+  }
+
+  /// 生成 UUID v4 字符串（用于 KUGOU_API_GUID）。
+  static String _generateUuidV4() {
+    final rng = Random();
+    final bytes = List<int>.generate(16, (_) => rng.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  }
+
+  /// 生成 10 位大写字母数字（用于 KUGOU_API_DEV）。
+  static String _generateDeviceDev() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final rng = Random();
+    return List.generate(10, (_) => chars[rng.nextInt(chars.length)]).join();
+  }
+
+  /// 生成 19 位数字（用于 KUGOU_API_WEBGL 指纹）。
+  static String _generateWebglHash() {
+    final rng = Random();
+    return List.generate(19, (_) => rng.nextInt(10).toString()).join();
+  }
+
+  /// 获取（必要时生成并保存）本客户端的独立设备参数。
+  static Future<Map<String, String>> _ensureDeviceParams() async {
+    if (_deviceCache != null) return _deviceCache!;
     final prefs = await SharedPreferences.getInstance();
-    final savedCookie = prefs.getString('user_cookie') ?? '';
-    if (savedCookie.isNotEmpty) return savedCookie;
+
+    var guid = prefs.getString(_kDeviceGuid) ?? '';
+    if (guid.isEmpty) {
+      guid = _generateUuidV4();
+      await prefs.setString(_kDeviceGuid, guid);
+    }
+    var dev = prefs.getString(_kDeviceDev) ?? '';
+    if (dev.isEmpty) {
+      dev = _generateDeviceDev();
+      await prefs.setString(_kDeviceDev, dev);
+    }
+    var mac = prefs.getString(_kDeviceMac) ?? '';
+    if (mac.isEmpty) {
+      mac = '02:00:00:00:00:00';
+      await prefs.setString(_kDeviceMac, mac);
+    }
+    var webgl = prefs.getString(_kDeviceWebgl) ?? '';
+    if (webgl.isEmpty) {
+      webgl = _generateWebglHash();
+      await prefs.setString(_kDeviceWebgl, webgl);
+    }
+    var mid = prefs.getString(_kDeviceMid) ?? '';
+    var dfid = prefs.getString(_kDeviceDfid) ?? '';
+    var platform = prefs.getString(_kDevicePlatform) ?? 'lite';
+
+    final params = <String, String>{
+      'KUGOU_API_GUID': guid,
+      'KUGOU_API_DEV': dev,
+      'KUGOU_API_MAC': mac,
+      'KUGOU_API_WEBGL': webgl,
+      'KUGOU_API_PLATFORM': platform,
+      if (mid.isNotEmpty) 'KUGOU_API_MID': mid,
+      if (dfid.isNotEmpty) 'dfid': dfid,
+    };
+    _deviceCache = params;
+    return params;
+  }
+
+  /// 合并用户 cookie 与设备参数，生成最终请求 cookie。
+  /// 使用内存缓存避免每次请求都同步读 SharedPreferences（主线程阻塞源）。
+  static Future<String> _buildFullCookie() async {
+    if (_userCookieCache != null) return _userCookieCache!;
+    final prefs = await SharedPreferences.getInstance();
+    final userCookie = prefs.getString('user_cookie') ?? '';
+    final parts = userCookie
+        .split(';')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+
+    // 设备参数优先覆盖同名字段（保证每客户端独立设备标识）
+    final device = await _ensureDeviceParams();
+    final userKeys = parts.map((p) => p.split('=').first.trim()).toSet();
+    device.forEach((key, value) {
+      final part = '$key=$value';
+      if (userKeys.contains(key)) {
+        final idx = parts.indexWhere((p) => p.split('=').first.trim() == key);
+        parts[idx] = part;
+      } else {
+        parts.add(part);
+      }
+    });
+
+    final full = parts.join(';');
+    _userCookieCache = full;
+    return full;
+  }
+
+  // 获取本地保存的 Cookie（用户 + 设备参数合并后的完整 cookie）
+  static Future<String> _getCookie() async {
+    final cookie = await _buildFullCookie();
+    if (cookie.isNotEmpty) return cookie;
 
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       final home =
@@ -156,10 +278,11 @@ class MusicApiService {
           '$home${separator}.config${separator}gomusic${separator}cookies.txt',
         );
         if (await file.exists()) {
-          final cookie = (await file.readAsString()).trim();
-          if (cookie.isNotEmpty) {
-            await prefs.setString('user_cookie', cookie);
-            return cookie;
+          final legacy = (await file.readAsString()).trim();
+          if (legacy.isNotEmpty) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('user_cookie', legacy);
+            return _buildFullCookie();
           }
         }
       }
@@ -168,59 +291,61 @@ class MusicApiService {
     return '';
   }
 
-  /// 从响应头 Set-Cookie 中提取设备参数（KUGOU_API_*、dfid）并合并进
-  /// 本地保存的 Cookie。对应 KuGouMusicApi 服务端下发的整套设备标识：
-  /// KUGOU_API_MID/GUID/DEV/MAC/WEBGL + dfid。
+  /// 从响应头 Set-Cookie 中提取设备参数并保存到独立的 device_* 字段。
+  /// 服务端会下发 KUGOU_API_MID/dfid 等由酷狗签发的值；GUID/DEV/MAC/WEBGL
+  /// 若客户端已生成则以客户端为准（服务端 ensureCookie 不会覆盖）。
   ///
-  /// 若不保存并回传这些设备参数，酷狗会因 token 与设备不匹配返回
-  /// 20017/20018（HTTP 502）。
+  /// 防抖：设备参数通常稳定，仅在值真正变化时才写 prefs 并刷新缓存，
+  /// 避免每个请求都做无谓的同步 IO（主线程阻塞源）。
   static Future<void> _mergeDeviceCookies(Response<dynamic> response) async {
     try {
       final setCookies = response.headers['set-cookie'];
       if (setCookies == null || setCookies.isEmpty) return;
-      final deviceKeys = const {
-        'KUGOU_API_PLATFORM',
-        'KUGOU_API_MID',
-        'KUGOU_API_GUID',
-        'KUGOU_API_DEV',
-        'KUGOU_API_MAC',
-        'KUGOU_API_WEBGL',
-        'dfid',
-      };
-      final deviceParts = <String>[];
+      final map = <String, String>{};
       for (final cookieHeader in setCookies) {
         final firstSegment = cookieHeader.split(';').first.trim();
         final eq = firstSegment.indexOf('=');
         if (eq <= 0) continue;
         final key = firstSegment.substring(0, eq).trim();
         final value = firstSegment.substring(eq + 1).trim();
-        if (deviceKeys.contains(key) && value.isNotEmpty) {
-          deviceParts.add('$key=$value');
-        }
+        if (value.isNotEmpty) map[key] = value;
       }
-      if (deviceParts.isEmpty) return;
+      if (map.isEmpty) return;
 
       final prefs = await SharedPreferences.getInstance();
-      final current = prefs.getString('user_cookie') ?? '';
-      final existingParts = current.split(';').map((p) => p.trim()).where((p) => p.isNotEmpty).toList();
-      final existingKeys =
-          existingParts.map((p) => p.split('=').first.trim()).toSet();
-      for (final part in deviceParts) {
-        final key = part.split('=').first.trim();
-        if (existingKeys.contains(key)) {
-          // 更新已有的设备参数值
-          final idx = existingParts.indexWhere(
-              (p) => p.split('=').first.trim() == key);
-          existingParts[idx] = part;
-        } else {
-          existingParts.add(part);
-        }
+      var changed = false;
+
+      Future<void> updateIfChanged(String prefsKey, String? newValue) async {
+        if (newValue == null || newValue.isEmpty) return;
+        if (prefs.getString(prefsKey) == newValue) return;
+        await prefs.setString(prefsKey, newValue);
+        changed = true;
       }
-      final merged = existingParts.join(';');
-      await prefs.setString('user_cookie', merged);
-      _qrLog('设备 Cookie 已合并: ${merged.length} 字符');
-    } catch (e) {
-      _qrLog('合并设备 Cookie 失败: $e');
+
+      await updateIfChanged(_kDeviceMid, map['KUGOU_API_MID']);
+      await updateIfChanged(_kDeviceDfid, map['dfid']);
+      await updateIfChanged(_kDevicePlatform, map['KUGOU_API_PLATFORM']);
+      // 客户端未生成时才采用服务端值（正常情况下客户端已生成 GUID/DEV 等）
+      if ((prefs.getString(_kDeviceGuid) ?? '').isEmpty) {
+        await updateIfChanged(_kDeviceGuid, map['KUGOU_API_GUID']);
+      }
+      if ((prefs.getString(_kDeviceDev) ?? '').isEmpty) {
+        await updateIfChanged(_kDeviceDev, map['KUGOU_API_DEV']);
+      }
+      if ((prefs.getString(_kDeviceMac) ?? '').isEmpty) {
+        await updateIfChanged(_kDeviceMac, map['KUGOU_API_MAC']);
+      }
+      if ((prefs.getString(_kDeviceWebgl) ?? '').isEmpty) {
+        await updateIfChanged(_kDeviceWebgl, map['KUGOU_API_WEBGL']);
+      }
+
+      if (changed) {
+        _deviceCache = null;
+        await _ensureDeviceParams();
+        _userCookieCache = null;
+      }
+    } catch (_) {
+      // 静默失败：设备参数合并失败不影响请求。
     }
   }
 
@@ -384,12 +509,51 @@ class MusicApiService {
 
   static Future<SearchPage<Song>> searchSongPage(String keyword,
       {int page = 1, int pageSize = 30}) async {
+    // 主路径：/search?type=song（酷狗 v1，Go 版验证可用的路径，解析 data.lists 的大写字段）
+    final songResult =
+        await _searchSongsByTypeSong(keyword, page: page, pageSize: pageSize);
+    if (songResult.items.isNotEmpty) return songResult;
+    // 兜底：/search/complex
+    return _searchSongsByComplex(keyword, page: page, pageSize: pageSize);
+  }
+
+  /// 酷狗 v1 /search?type=song：返回 data.lists，字段为大写（FileHash/OriSongName/...）。
+  static Future<SearchPage<Song>> _searchSongsByTypeSong(String keyword,
+      {int page = 1, int pageSize = 30}) async {
+    if (keyword.trim().isEmpty) return const SearchPage(items: [], total: 0);
+    try {
+      final cookie = await _getCookie();
+      final response = await _dio.get('$baseApi/search', queryParameters: {
+        'keywords': keyword,
+        'type': 'song',
+        'page': page,
+        'pagesize': pageSize,
+        'cookie': cookie,
+      });
+      final data = response.data?['data'];
+      if (response.data?['error_code'] == 0 && data is Map) {
+        final list = data['lists'] as List? ?? [];
+        return SearchPage(
+          items: list
+              .whereType<Map>()
+              .map((item) => Song.fromJson(Map<String, dynamic>.from(item)))
+              .toList(),
+          total: _asInt(data['total']),
+        );
+      }
+    } catch (_) {}
+    return const SearchPage(items: [], total: 0);
+  }
+
+  /// 酷狗 v6 /search/complex（分节结构，备用）。
+  static Future<SearchPage<Song>> _searchSongsByComplex(String keyword,
+      {int page = 1, int pageSize = 30}) async {
     if (keyword.trim().isEmpty) return const SearchPage(items: [], total: 0);
     try {
       final cookie = await _getCookie();
       final response =
           await _dio.get('$baseApi/search/complex', queryParameters: {
-        'keywords': keyword,
+        'keyword': keyword,
         'page': page,
         'pagesize': pageSize,
         'cookie': cookie,
@@ -748,6 +912,69 @@ class MusicApiService {
       }
     }
     return [];
+  }
+
+  /// 播放地址 + 歌词（与原版 Go 的 GetSongUrl 一致：响应中直接返回 Lyrics）。
+  /// 云端 /song/url 正常情况下会携带歌词，避免单独调 /search/lyric
+  /// （该接口在部分部署下返回空）。
+  static Future<({List<String> urls, String lyrics})> getPlayUrlsWithLyrics(
+    String hash, {
+    String songName = '',
+    String artist = '',
+    String quality = '128k',
+  }) async {
+    if (hash.trim().isEmpty) {
+      return (urls: <String>[], lyrics: '');
+    }
+    final normalizedQuality = _normalizeAudioQuality(quality);
+    final qualityChain = normalizedQuality == 'flac'
+        ? const ['flac', '320', '128']
+        : normalizedQuality == '320'
+            ? const ['320', '128']
+            : const ['128'];
+    final cookie = await _getCookie();
+    await _claimYouthVipIfNeeded(cookie);
+
+    for (final requestedQuality in qualityChain) {
+      try {
+        final response = await _dio.get('$baseApi/song/url', queryParameters: {
+          'hash': hash,
+          'quality': requestedQuality,
+          'cookie': cookie.contains('KUGOU_API_PLATFORM')
+              ? cookie
+              : '$cookie;KUGOU_API_PLATFORM=lite',
+        });
+        final data = response.data;
+        final urls = _extractPlayUrls(data);
+        if (urls.isEmpty) continue;
+        // 与 Go 版一致：播放地址响应中的歌词字段（data.lyrics 或顶层 lyrics）
+        String lyrics = '';
+        final dataMap = data is Map ? data['data'] : null;
+        if (data is Map && data['lyrics'] is String) {
+          lyrics = data['lyrics'] as String;
+        } else if (dataMap is Map && dataMap['lyrics'] is String) {
+          lyrics = dataMap['lyrics'] as String;
+        }
+        return (urls: urls, lyrics: lyrics);
+      } catch (e) {
+        print('获取播放地址(含歌词)失败: hash=$hash quality=$requestedQuality error=$e');
+      }
+    }
+
+    // 兜底：主路径失败时，独立获取播放地址（不因歌词接口失败而阻塞播放）。
+    final fallbackUrls = await getPlayUrls(hash, quality: quality);
+    if (fallbackUrls.isEmpty) {
+      return (urls: <String>[], lyrics: '');
+    }
+    // 歌词尽力而为：失败不影响播放。
+    String fallbackLyrics = '';
+    try {
+      fallbackLyrics =
+          await _loadRawLyrics(hash, songName: songName, artist: artist);
+    } catch (_) {
+      fallbackLyrics = '';
+    }
+    return (urls: fallbackUrls, lyrics: fallbackLyrics);
   }
 
   static Future<String?> getPlayUrl(String hash,
@@ -1250,7 +1477,9 @@ class MusicApiService {
       await file.rename(filePath);
       final prefs = await SharedPreferences.getInstance();
       if (prefs.getBool('download_lyrics') ?? true) {
-        final lyrics = await getRawLyricsWithFormat(song.hash);
+        final lyrics =
+            await getRawLyricsWithFormat(song.hash,
+                songName: song.songName, artist: song.authorName);
         if (lyrics != null && lyrics.content.isNotEmpty) {
           await File(p.setExtension(filePath, '.${lyrics.format}'))
               .writeAsString(lyrics.content);
@@ -1340,13 +1569,14 @@ class MusicApiService {
   }
 
   // 13. 获取歌词
-  static Future<LyricsContent?> getRawLyricsWithFormat(String hash) async {
+  static Future<LyricsContent?> getRawLyricsWithFormat(String hash,
+      {String songName = '', String artist = ''}) async {
     if (hash.trim().isEmpty) return null;
     try {
       final cache = await MediaCacheService.instance;
       final cached = await cache.getLyrics(
         hash: hash,
-        loader: () => _loadRawLyrics(hash),
+        loader: () => _loadRawLyrics(hash, songName: songName, artist: artist),
       );
       return cached.content.trim().isEmpty
           ? null
@@ -1357,26 +1587,95 @@ class MusicApiService {
     }
   }
 
-  static Future<String> _loadRawLyrics(String hash) async {
+  static Future<String> _loadRawLyrics(String hash,
+      {String songName = '', String artist = ''}) async {
+    var content = '';
     final cookie = await _getCookie();
-    final search = await _dio.get('$baseApi/search/lyric', queryParameters: {
-      'hash': hash,
-      'cookie': cookie,
-      'man': 'no',
-    });
-    final candidates = search.data?['candidates'];
-    if (candidates is! List || candidates.isEmpty) return '';
-    final candidate = candidates.first;
-    if (candidate is! Map) return '';
-    final id = candidate['id']?.toString() ?? '';
-    final accessKey = candidate['accesskey']?.toString() ?? '';
-    if (id.isEmpty || accessKey.isEmpty) return '';
+    try {
+      final search = await _dio.get('$baseApi/search/lyric', queryParameters: {
+        'hash': hash,
+        'cookie': cookie,
+        'man': 'no',
+      });
+      final candidates = search.data?['candidates'];
+      if (candidates is List && candidates.isNotEmpty) {
+        final candidate = candidates.first;
+        if (candidate is Map) {
+          final id = candidate['id']?.toString() ?? '';
+          final accessKey = candidate['accesskey']?.toString() ?? '';
+          if (id.isNotEmpty && accessKey.isNotEmpty) {
+            for (final format in const ['krc', 'lrc']) {
+              try {
+                final response = await _dio.get('$baseApi/lyric',
+                    queryParameters: {
+                      'id': id,
+                      'accesskey': accessKey,
+                      'decode': 'true',
+                      'fmt': format,
+                      'cookie': cookie,
+                    });
+                final decoded =
+                    response.data?['decodeContent']?.toString().trim() ?? '';
+                if (decoded.isNotEmpty) {
+                  content = decoded;
+                  break;
+                }
+              } catch (_) {
+                // Continue with the lower fidelity format.
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('云端歌词搜索失败，转入兜底: $e');
+    }
 
+    if (content.isEmpty) {
+      // 兜底1：部分部署下 /search/lyric 返回空但 /lyric 支持按 hash 直取。
+      content = await _loadLyricsByHashDirect(hash, cookie);
+    }
+    if (content.isEmpty) {
+      // 兜底2：云端歌词接口不可用（空响应/502）时，改用自建 Meting 聚合源。
+      content = await _loadLyricsFromMeting(hash, songName, artist);
+    }
+    return content;
+  }
+
+  /// 歌词最终兜底：先按 hash 走 Meting kugou 源直取，
+  /// 失败且已知歌名时再按「歌名+歌手」走 netease 源搜索。
+  static Future<String> _loadLyricsFromMeting(
+      String hash, String songName, String artist) async {
+    try {
+      final kugou = await MetingApiService.getKugouLyricsByHash(hash);
+      if (kugou != null && kugou.isNotEmpty) {
+        print('✅ Meting kugou 歌词兜底成功: hash=$hash');
+        return kugou;
+      }
+    } catch (e) {
+      print('Meting kugou 歌词兜底失败: $e');
+    }
+    if (songName.trim().isEmpty) return '';
+    try {
+      final netease =
+          await MetingApiService.getLyricsBySearch(songName, artist);
+      if (netease != null && netease.isNotEmpty) {
+        print('✅ Meting netease 歌词兜底成功: $songName - $artist');
+        return netease;
+      }
+    } catch (e) {
+      print('Meting netease 歌词兜底失败: $e');
+    }
+    return '';
+  }
+
+  /// 兜底：直接按 hash 请求歌词（部分 KuGouMusicApi 部署支持 /lyric?hash=）。
+  static Future<String> _loadLyricsByHashDirect(
+      String hash, String cookie) async {
     for (final format in const ['krc', 'lrc']) {
       try {
         final response = await _dio.get('$baseApi/lyric', queryParameters: {
-          'id': id,
-          'accesskey': accessKey,
+          'hash': hash,
           'decode': 'true',
           'fmt': format,
           'cookie': cookie,
@@ -1391,12 +1690,18 @@ class MusicApiService {
     return '';
   }
 
-  static Future<String> getRawLyrics(String hash) async {
-    return (await getRawLyricsWithFormat(hash))?.content ?? '';
+  static Future<String> getRawLyrics(String hash,
+      {String songName = '', String artist = ''}) async {
+    return (await getRawLyricsWithFormat(hash,
+            songName: songName, artist: artist))
+        ?.content ??
+        '';
   }
 
-  static Future<List<LyricLine>> getLyrics(String hash) async {
-    return parseLyrics(await getRawLyrics(hash));
+  static Future<List<LyricLine>> getLyrics(String hash,
+      {String songName = '', String artist = ''}) async {
+    return parseLyrics(
+        await getRawLyrics(hash, songName: songName, artist: artist));
   }
 
   // 8. 登录/用户体系 API
@@ -1415,11 +1720,15 @@ class MusicApiService {
   static Future<Map<String, dynamic>> loginWithPhone(
       String mobile, String code) async {
     try {
-      final response =
-          await _dio.get('$baseApi/login/cellphone', queryParameters: {
+      final cookie = await _getCookie();
+      final queryParams = <String, dynamic>{
         'mobile': mobile,
         'code': code,
-      });
+      };
+      // 携带已保存的设备 Cookie，保证 token 与设备参数绑定。
+      if (cookie.isNotEmpty) queryParams['cookie'] = cookie;
+      final response =
+          await _dio.get('$baseApi/login/cellphone', queryParameters: queryParams);
       if (response.data != null &&
           (response.data['error_code'] == 0 || response.data['status'] == 1)) {
         final token = response.data['data']?['token'] ?? '';
@@ -1430,6 +1739,7 @@ class MusicApiService {
         await prefs.setString('user_token', token.toString());
         await prefs.setInt('user_id', int.tryParse(userid.toString()) ?? 0);
         await prefs.setString('login_method', 'phone');
+        invalidateCookieCache();
         // 合并服务端下发的整套设备 Cookie，后续请求回传完整 Cookie。
         await _mergeDeviceCookies(response);
         return {'success': true, 'data': response.data['data']};
@@ -1443,11 +1753,14 @@ class MusicApiService {
   static Future<Map<String, dynamic>> generateQRKey() async {
     _qrLog('开始获取二维码 Key');
     try {
-      final response =
-          await _dio.get('$baseApi/login/qr/key', queryParameters: {
+      final cookie = await _getCookie();
+      final queryParams = <String, dynamic>{
         'platform': 'pc',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
-      });
+      };
+      if (cookie.isNotEmpty) queryParams['cookie'] = cookie;
+      final response =
+          await _dio.get('$baseApi/login/qr/key', queryParameters: queryParams);
       _qrLog('二维码 Key 响应: ${_qrSummary(response.data)}');
       return response.data is Map<String, dynamic> ? response.data : {};
     } catch (e) {
@@ -1459,13 +1772,16 @@ class MusicApiService {
   static Future<Map<String, dynamic>> createQRCode(String key) async {
     _qrLog('开始生成二维码图片，key=${_maskQrKey(key)}');
     try {
-      final response =
-          await _dio.get('$baseApi/login/qr/create', queryParameters: {
+      final cookie = await _getCookie();
+      final queryParams = <String, dynamic>{
         'key': key,
         'qrimg': 'true',
         'platform': 'pc',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
-      });
+      };
+      if (cookie.isNotEmpty) queryParams['cookie'] = cookie;
+      final response =
+          await _dio.get('$baseApi/login/qr/create', queryParameters: queryParams);
       final data = response.data is Map ? response.data['data'] : null;
       final base64 = data is Map ? data['base64']?.toString() : null;
       _qrLog(
@@ -1480,12 +1796,17 @@ class MusicApiService {
   static Future<Map<String, dynamic>> checkQRStatus(String key) async {
     _qrLog('检查二维码状态，key=${_maskQrKey(key)}');
     try {
-      final response =
-          await _dio.get('$baseApi/login/qr/check', queryParameters: {
+      final cookie = await _getCookie();
+      final queryParams = <String, dynamic>{
         'key': key,
         'platform': 'pc',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
-      });
+      };
+      // 关键：扫码确认时必须携带已保存的整套设备 Cookie，否则酷狗
+      // 返回的 token 未正确绑定设备，后续 /user/detail 等接口会 20018。
+      if (cookie.isNotEmpty) queryParams['cookie'] = cookie;
+      final response =
+          await _dio.get('$baseApi/login/qr/check', queryParameters: queryParams);
       final payload = response.data;
       if (payload is Map<String, dynamic>) {
         final data = payload['data'];
@@ -1504,11 +1825,12 @@ class MusicApiService {
             await prefs.setString('user_token', token);
             await prefs.setInt('user_id', userid);
             await prefs.setString('login_method', 'qrcode');
+            invalidateCookieCache();
             _qrLog('扫码登录 Cookie 已保存，长度=${cookie.length}');
-            // 合并服务端下发的整套设备 Cookie（KUGOU_API_*、dfid），
-            // 后续请求回传完整 Cookie 才能通过酷狗设备校验。
+            // 吸收服务端签发的设备参数（KUGOU_API_MID/dfid 等），
+            // 后续请求由 _getCookie 合并携带完整 Cookie。
             await _mergeDeviceCookies(response);
-            _qrLog('扫码登录完成，合并设备 Cookie 后 user_cookie 已更新');
+            _qrLog('扫码登录完成，设备参数已吸收');
           } else {
             _qrLog('扫码成功但缺少 token 或 userid，未保存登录状态');
           }
@@ -1604,6 +1926,7 @@ class MusicApiService {
     await prefs.remove('user_cookie');
     await prefs.remove('user_token');
     await prefs.remove('user_id');
+    invalidateCookieCache();
   }
 
   static List<LyricLine> parseLyrics(String content) {

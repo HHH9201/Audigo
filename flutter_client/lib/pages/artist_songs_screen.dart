@@ -1,52 +1,110 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+
 import '../models/song.dart';
 import '../services/audio_player_manager.dart';
 import '../services/music_api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_toast.dart';
 
-class AlbumDetailDestination {
-  final String id;
-  final String title;
-  final String? coverUrl;
-  final String? artist;
-  final String type;
-
-  AlbumDetailDestination({
-    required this.id,
-    required this.title,
-    this.coverUrl,
-    this.artist,
-    this.type = 'album',
-  });
-}
-
-/// 专辑/歌单详情页 —— 与“我喜欢的”页面同款操作布局：
-/// 大封面 + 类型徽标 + 标题 + 创建者 + 歌曲数 + 操作按钮（播放全部/批量下载/刷新），
+/// 歌手歌曲页 —— 与“我喜欢的”页面同款操作布局：
+/// 大封面 + 歌手徽标 + 唱名 + 歌曲数 + 操作按钮（播放全部/批量下载/刷新），
 /// 下方为表格型歌曲列表（# / 标题 / 专辑 / 时长 / 操作）。
-class AlbumDetailScreen extends StatefulWidget {
-  final AlbumDetailDestination destination;
+/// 歌曲按歌手名拉取（优先 /search?type=song，兜底 /search/complex）。
+class ArtistSongsScreen extends StatefulWidget {
+  final String name;
+  final String? coverUrl;
   final VoidCallback onBack;
 
-  const AlbumDetailScreen({
+  const ArtistSongsScreen({
     super.key,
-    required this.destination,
+    required this.name,
+    this.coverUrl,
     required this.onBack,
   });
 
   @override
-  State<AlbumDetailScreen> createState() => _AlbumDetailScreenState();
+  State<ArtistSongsScreen> createState() => _ArtistSongsScreenState();
 }
 
-class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
-  List<Song> _songs = [];
+class _ArtistSongsScreenState extends State<ArtistSongsScreen>
+    with AutomaticKeepAliveClientMixin {
+  final List<Song> _songs = [];
   bool _isLoading = true;
   bool _isRefreshing = false;
+  bool _loadingMore = false;
+  bool _hasMore = true;
   final Set<String> _downloadingHashes = {};
   bool _isBatchDownloading = false;
   int _totalCount = 0;
+  int _page = 1;
+  int _pageSize = 30;
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 200) {
+        _loadMore();
+      }
+    });
+    _loadFirstPage();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadFirstPage() async {
+    setState(() {
+      _isLoading = true;
+      _isRefreshing = true;
+      _page = 1;
+      _hasMore = true;
+    });
+    final result = await MusicApiService.searchSongPage(widget.name,
+        page: 1, pageSize: _pageSize);
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      _isRefreshing = false;
+      _songs
+        ..clear()
+        ..addAll(result.items);
+      _totalCount = result.total;
+      _hasMore = result.items.length < result.total;
+    });
+  }
+
+  Future<void> _refresh() async {
+    if (_isRefreshing) return;
+    await _loadFirstPage();
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+    setState(() => _loadingMore = true);
+    final next = _page + 1;
+    final result = await MusicApiService.searchSongPage(widget.name,
+        page: next, pageSize: _pageSize);
+    if (!mounted) return;
+    setState(() {
+      _loadingMore = false;
+      _page = next;
+      if (result.items.isNotEmpty) {
+        _songs.addAll(result.items);
+      }
+      _hasMore = _songs.length < result.total;
+    });
+  }
 
   Future<void> _downloadSong(Song song) async {
     if (_downloadingHashes.contains(song.hash)) return;
@@ -85,37 +143,6 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
     );
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _loadAlbumSongs();
-  }
-
-  Future<void> _loadAlbumSongs() async {
-    setState(() {
-      _isLoading = true;
-      _isRefreshing = true;
-    });
-    final songs = switch (widget.destination.type) {
-      'album' => await MusicApiService.getAlbumSongs(widget.destination.id),
-      'accountPlaylist' =>
-        await MusicApiService.getAccountPlaylistSongs(widget.destination.id),
-      _ => await MusicApiService.getPlaylistSongs(widget.destination.id),
-    };
-    if (!mounted) return;
-    setState(() {
-      _songs = songs;
-      _totalCount = songs.length;
-      _isLoading = false;
-      _isRefreshing = false;
-    });
-  }
-
-  Future<void> _refresh() async {
-    if (_isRefreshing) return;
-    await _loadAlbumSongs();
-  }
-
   String _formatDuration(int seconds) {
     if (seconds <= 0) return '--:--';
     final m = (seconds ~/ 60).toString().padLeft(2, '0');
@@ -125,9 +152,11 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       backgroundColor: AppTheme.bgWarm,
       body: CustomScrollView(
+        controller: _scrollController,
         slivers: [
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(32, 24, 32, 0),
@@ -135,7 +164,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 返回按钮
+                  // 返回按钮（与专辑/歌单详情一致）
                   IconButton(
                     icon: Icon(Icons.arrow_back_rounded,
                         color: AppTheme.textPrimary),
@@ -156,10 +185,9 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(12),
-                          child: (widget.destination.coverUrl != null &&
-                                  widget.destination.coverUrl!.isNotEmpty)
+                          child: widget.coverUrl?.isNotEmpty == true
                               ? CachedNetworkImage(
-                                  imageUrl: widget.destination.coverUrl!,
+                                  imageUrl: widget.coverUrl!,
                                   width: 140,
                                   height: 140,
                                   fit: BoxFit.cover,
@@ -167,7 +195,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                                     width: 140,
                                     height: 140,
                                     color: AppTheme.surfaceWarm,
-                                    child: Icon(Icons.album,
+                                    child: Icon(Icons.person,
                                         size: 64,
                                         color: AppTheme.textSecondary),
                                   ),
@@ -176,7 +204,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                                   width: 140,
                                   height: 140,
                                   color: AppTheme.surfaceWarm,
-                                  child: Icon(Icons.album,
+                                  child: Icon(Icons.person,
                                       size: 64,
                                       color: AppTheme.textSecondary),
                                 ),
@@ -195,9 +223,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
-                                  widget.destination.type == 'album'
-                                      ? '专辑'
-                                      : '歌单',
+                                  '歌手',
                                   style: TextStyle(
                                       color: AppTheme.accentOrange,
                                       fontSize: 11,
@@ -206,39 +232,18 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                widget.destination.title,
+                                widget.name,
                                 style: TextStyle(
                                     fontSize: 22,
                                     fontWeight: FontWeight.bold,
                                     color: AppTheme.textPrimary),
                               ),
                               const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  if (widget.destination.artist != null) ...[
-                                    Flexible(
-                                      child: Text(
-                                        widget.destination.artist!,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                            fontSize: 14,
-                                            color: AppTheme.textSecondary),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text('·',
-                                        style: TextStyle(
-                                            color: AppTheme.textSecondary)),
-                                    const SizedBox(width: 6),
-                                  ],
-                                  Text(
-                                    '$_totalCount首歌曲',
-                                    style: TextStyle(
-                                        fontSize: 14,
-                                        color: AppTheme.textSecondary),
-                                  ),
-                                ],
+                              Text(
+                                '$_totalCount首歌曲',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    color: AppTheme.textSecondary),
                               ),
                               const SizedBox(height: 16),
                               Row(
@@ -391,18 +396,19 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
             )
           else if (_songs.isEmpty)
             SliverToBoxAdapter(
-              child: Padding(
+              child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 60),
-                child: Center(
-                  child: Column(
-                    children: [
-                      Icon(Icons.music_off_rounded,
-                          size: 48, color: AppTheme.textSecondary),
-                      const SizedBox(height: 12),
-                      Text('暂无歌曲',
-                          style: TextStyle(color: AppTheme.textSecondary)),
-                    ],
-                  ),
+                alignment: Alignment.center,
+                child: Column(
+                  children: [
+                    Icon(Icons.person_outline_rounded,
+                        size: 48, color: AppTheme.textSecondary),
+                    const SizedBox(height: 12),
+                    Text(
+                      '暂无歌曲，稍后再试',
+                      style: TextStyle(color: AppTheme.textSecondary),
+                    ),
+                  ],
                 ),
               ),
             )
@@ -584,6 +590,18 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                     ),
                   );
                 },
+              ),
+            ),
+          if (_loadingMore)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.accentOrange,
+                  ),
+                ),
               ),
             ),
         ],

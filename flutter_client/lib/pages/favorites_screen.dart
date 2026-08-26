@@ -6,6 +6,7 @@ import '../models/song.dart';
 import '../services/audio_player_manager.dart';
 import '../services/music_api_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_toast.dart';
 
 /// “我喜欢的”页面 —— 与原版 Go 版布局一致：
 /// 大封面 + 类型徽章 + 歌单标题 + 创建者 + 歌曲数 + 简介 + 操作按钮，
@@ -27,6 +28,10 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   String _intro = '';
   String _creator = '';
   int _totalCount = 0;
+
+  // 下载状态
+  final Set<String> _downloadingHashes = {};
+  bool _isBatchDownloading = false;
 
   @override
   void initState() {
@@ -65,6 +70,45 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
 
   Future<void> _refresh() async {
     await _loadFavorites();
+  }
+
+  /// 下载单首歌曲。
+  Future<void> _downloadSong(Song song) async {
+    if (_downloadingHashes.contains(song.hash)) return;
+    setState(() => _downloadingHashes.add(song.hash));
+    final path = await MusicApiService.downloadSong(song);
+    if (!mounted) return;
+    setState(() => _downloadingHashes.remove(song.hash));
+    AppToast.show(
+      context,
+      path == null ? '下载失败或已取消' : '已下载到 $path',
+      isError: path == null,
+    );
+  }
+
+  /// 批量下载全部收藏歌曲。
+  Future<void> _downloadAll() async {
+    if (_favorites.isEmpty || _isBatchDownloading) return;
+    setState(() => _isBatchDownloading = true);
+    var success = 0;
+    var failed = 0;
+    for (final song in _favorites) {
+      final path = await MusicApiService.downloadSong(song);
+      if (path != null) {
+        success++;
+      } else {
+        failed++;
+      }
+    }
+    if (!mounted) return;
+    setState(() => _isBatchDownloading = false);
+    AppToast.show(
+      context,
+      failed == 0
+          ? '批量下载完成：共 $success 首'
+          : '批量下载完成：成功 $success 首，失败 $failed 首',
+      isError: failed > 0,
+    );
   }
 
   String _formatDuration(int seconds) {
@@ -220,6 +264,42 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                                         : null,
                                   ),
                                   const SizedBox(width: 8),
+                                  OutlinedButton.icon(
+                                    icon: _isBatchDownloading
+                                        ? SizedBox(
+                                            width: 14,
+                                            height: 14,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color:
+                                                    AppTheme.accentOrange),
+                                          )
+                                        : Icon(Icons.download_rounded,
+                                            size: 16,
+                                            color: AppTheme.accentOrange),
+                                    label: Text(
+                                      _isBatchDownloading
+                                          ? '下载中...'
+                                          : '批量下载',
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          color: AppTheme.accentOrange),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 16, vertical: 10),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(20)),
+                                      side: BorderSide(
+                                          color: AppTheme.accentOrange
+                                              .withOpacity(0.6)),
+                                    ),
+                                    onPressed: _favorites.isNotEmpty
+                                        ? _downloadAll
+                                        : null,
+                                  ),
+                                  const SizedBox(width: 8),
                                   IconButton(
                                     tooltip: '刷新歌单',
                                     icon: _isRefreshing
@@ -282,7 +362,8 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                                     fontWeight: FontWeight.bold,
                                     fontSize: 12,
                                     color: AppTheme.textSecondary))),
-                        SizedBox(width: 96, child: Text('操作',
+                        SizedBox(width: 150, child: Text('操作',
+                            textAlign: TextAlign.center,
                             style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 12,
@@ -445,15 +526,26 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                           ),
                         ),
                         SizedBox(
-                          width: 96,
+                          width: 150,
                           child: Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
+                              // 播放按钮（与收藏按钮互换位置：播放在前）
+                              IconButton(
+                                tooltip: '播放',
+                                visualDensity: VisualDensity.compact,
+                                icon: Icon(Icons.play_circle_outline_rounded,
+                                    color: AppTheme.accentOrange, size: 22),
+                                onPressed: () => context
+                                    .read<AudioPlayerManager>()
+                                    .playSong(song, newPlaylist: _favorites),
+                              ),
                               Selector<AudioPlayerManager, bool>(
                                 selector: (_, player) =>
                                     player.isFavorite(song.hash),
                                 builder: (context, isFav, _) => IconButton(
                                   tooltip: isFav ? '取消收藏' : '收藏',
+                                  visualDensity: VisualDensity.compact,
                                   icon: Icon(
                                     isFav
                                         ? Icons.favorite
@@ -477,13 +569,22 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                                   }),
                                 ),
                               ),
+                              // 下载按钮
                               IconButton(
-                                tooltip: '播放',
-                                icon: Icon(Icons.play_circle_outline_rounded,
-                                    color: AppTheme.accentOrange, size: 22),
-                                onPressed: () => context
-                                    .read<AudioPlayerManager>()
-                                    .playSong(song, newPlaylist: _favorites),
+                                tooltip: '下载',
+                                visualDensity: VisualDensity.compact,
+                                icon: _downloadingHashes.contains(song.hash)
+                                    ? SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: AppTheme.accentOrange),
+                                      )
+                                    : Icon(Icons.download_rounded,
+                                        color: AppTheme.textSecondary,
+                                        size: 20),
+                                onPressed: () => _downloadSong(song),
                               ),
                             ],
                           ),

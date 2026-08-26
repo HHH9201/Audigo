@@ -10,6 +10,8 @@ let isScanning = false;
 let musicFolderPaths = []; // 存储用户添加的文件夹路径
 let expandedFolders = new Set(); // 存储展开的文件夹
 let isPathListExpanded = true; // 文件夹路径列表是否展开
+let folderPages = {};           // 记录每个文件夹当前的页码
+const FOLDER_PAGE_SIZE = 100;   // 每个文件夹每页渲染的歌曲数量，避免一次性加载大量歌曲导致卡死
 
 // 初始化本地音乐功能
 function initLocalMusic() {
@@ -843,22 +845,64 @@ function createFolderSection(group) {
                 </button>
             </div>
         </div>
-        <div class="folder-content ${isExpanded ? 'expanded' : 'collapsed'}">
-            <div class="folder-music-header">
-                <div>#</div>
-                <div></div>
-                <div>歌曲</div>
-                <div>专辑</div>
-                <div>时长</div>
-                <div>操作</div>
-            </div>
-            <div class="folder-music-list">
-                ${group.music_files.map((musicFile, index) => createFolderSongItemHTML(musicFile, index, group.folder_path)).join('')}
-            </div>
-        </div>
+        <div class="folder-content ${isExpanded ? 'expanded' : 'collapsed'}"></div>
     `;
 
+    // 仅渲染当前页歌曲，避免一次性生成整个文件夹的 DOM
+    renderFolderContent(folderSection, group);
+
     return folderSection;
+}
+
+// 构建文件夹内容的 HTML（只包含当前页的歌曲 + 分页控件）
+function buildFolderContentHTML(folderPath, group) {
+    const isExpanded = expandedFolders.has(folderPath);
+    const total = group.music_files.length;
+    const totalPages = Math.max(1, Math.ceil(total / FOLDER_PAGE_SIZE));
+    let page = folderPages[folderPath] || 1;
+    if (page > totalPages) page = totalPages;
+    folderPages[folderPath] = page;
+
+    let songRows = '';
+    if (isExpanded) {
+        const startIndex = (page - 1) * FOLDER_PAGE_SIZE;
+        const pageSongs = group.music_files.slice(startIndex, startIndex + FOLDER_PAGE_SIZE);
+        songRows = pageSongs.map((musicFile, index) =>
+            createFolderSongItemHTML(musicFile, startIndex + index, folderPath)
+        ).join('');
+    }
+
+    let paginationHTML = '';
+    if (isExpanded && totalPages > 1) {
+        paginationHTML = `
+            <div class="folder-pagination">
+                <button class="folder-page-btn" onclick="event.stopPropagation(); changeFolderPage('${escapeHtml(folderPath)}', -1)" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+                <span class="folder-page-info">${page} / ${totalPages} 页（共 ${total} 首）</span>
+                <button class="folder-page-btn" onclick="event.stopPropagation(); changeFolderPage('${escapeHtml(folderPath)}', 1)" ${page >= totalPages ? 'disabled' : ''}>下一页</button>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="folder-music-header">
+            <div>#</div>
+            <div></div>
+            <div>歌曲</div>
+            <div>专辑</div>
+            <div>时长</div>
+            <div>操作</div>
+        </div>
+        <div class="folder-music-list">${songRows}</div>
+        ${paginationHTML}
+    `;
+}
+
+// 重新渲染某个文件夹的歌曲内容（配合分页切换）
+function renderFolderContent(folderSection, group) {
+    const folderContent = folderSection.querySelector('.folder-content');
+    if (folderContent) {
+        folderContent.innerHTML = buildFolderContentHTML(group.folder_path, group);
+    }
 }
 
 // 创建文件夹内歌曲项的HTML
@@ -1330,6 +1374,8 @@ window.toggleFolder = function(folderPath) {
         folderContent.classList.add('collapsed');
         toggleIcon.className = 'fas fa-chevron-right';
         folderIcon.className = 'fas fa-folder';
+        // 折叠时释放歌曲 DOM，避免占用内存
+        folderContent.innerHTML = '';
     } else {
         // 展开文件夹
         expandedFolders.add(folderPath);
@@ -1337,7 +1383,19 @@ window.toggleFolder = function(folderPath) {
         folderContent.classList.add('expanded');
         toggleIcon.className = 'fas fa-chevron-down';
         folderIcon.className = 'fas fa-folder-open';
+        // 展开时渲染当前页歌曲
+        const group = folderMusicGroups.find(g => g.folder_path === folderPath);
+        if (group) renderFolderContent(folderSection, group);
     }
+};
+
+// 切换文件夹内的分页（prev: -1, next: 1）
+window.changeFolderPage = function(folderPath, delta) {
+    folderPages[folderPath] = (folderPages[folderPath] || 1) + delta;
+    const folderSection = document.querySelector(`[data-folder-path="${CSS.escape(folderPath)}"]`);
+    if (!folderSection) return;
+    const group = folderMusicGroups.find(g => g.folder_path === folderPath);
+    if (group) renderFolderContent(folderSection, group);
 };
 
 // 播放文件夹内的所有音乐
