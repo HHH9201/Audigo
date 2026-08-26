@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 
 /// 轻量气泡提示（Toast），基于 Overlay 实现，无第三方依赖。
 ///
@@ -90,8 +91,8 @@ class _ToastBubbleState extends State<_ToastBubble>
         ? Icons.error_outline_rounded
         : Icons.check_circle_outline_rounded;
     final iconColor = widget.isError
-        ? const Color(0xFFFF8A80)
-        : const Color(0xFF69F0AE);
+        ? const Color(0xFFE5484D)
+        : const Color(0xFF30A46C);
     return Positioned(
       // 右上角提示（避开自定义标题栏，向下偏移）
       top: MediaQuery.of(context).padding.top + 56,
@@ -109,11 +110,13 @@ class _ToastBubbleState extends State<_ToastBubble>
                   vertical: 11,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xE61B1B1B),
+                  // 跟随应用主题配色
+                  color: AppTheme.surfaceWhite,
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.borderWarm),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.25),
+                      color: AppTheme.textPrimary.withOpacity(0.12),
                       blurRadius: 16,
                       offset: const Offset(0, 6),
                     ),
@@ -129,8 +132,8 @@ class _ToastBubbleState extends State<_ToastBubble>
                         widget.message,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
                           fontSize: 13,
                         ),
                       ),

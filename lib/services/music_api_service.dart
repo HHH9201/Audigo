@@ -50,7 +50,11 @@ class MusicApiService {
   static const List<String> apiMirrors = [
     "https://localhost:40000",
   ];
-  static String baseApi = apiMirrors.first;
+  // 可通过 --dart-define=AUDIGO_API=http://localhost:40000 指向本地 KuGouMusicApi 调试
+  static String baseApi = const String.fromEnvironment(
+    'AUDIGO_API',
+    defaultValue: 'https://localhost:40000',
+  );
 
   // 云网关鉴权 token（与原版 Go config.go 的 apiToken 一致）
   static const String apiToken =
@@ -1706,12 +1710,26 @@ class MusicApiService {
 
   // 8. 登录/用户体系 API
 
-  /// 将登录相关异常转为用户可读文案（如服务端 502 网关故障时引导改用二维码登录）。
+  /// 将登录相关异常转为用户可读文案。
+  /// KuGouMusicApi 把上游业务失败（验证码错误/过期/风控等）统一包装成
+  /// HTTP 502 返回，真实原因在响应体 data 字段里，优先提取展示。
   static String _friendlyLoginError(Object e) {
     if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map<String, dynamic>) {
+        final detail = data['data'] ?? data['message'] ?? data['msg'];
+        if (detail is String && detail.trim().isNotEmpty) {
+          if (data['error_code'] == 20018) {
+            return '触发酷狗风控，请稍后重试或改用二维码登录';
+          }
+          return detail;
+        }
+      }
       final status = e.response?.statusCode;
       if (status != null && status >= 500) {
-        return '登录服务暂时不可用（$status），请稍后重试或改用二维码登录';
+        // 云端 CDN 收到 502 时会吞掉响应体拿不到具体原因，
+        // 最常见原因是验证码错误或过期。
+        return '登录失败（$status）：验证码可能错误或已过期，请重试或改用二维码登录';
       }
       if (status == 401 || status == 403) {
         return '请求被拒绝（$status），请稍后重试';
