@@ -1,10 +1,12 @@
-# Project-level configuration.
+﻿# Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
 project(audigo LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "拾音")
+set(BINARY_NAME "audigo")
+# 目标名必须为 ASCII；通过 OUTPUT_NAME 让打包产物为中文名「拾音.exe」。
+set(APP_OUTPUT_NAME "拾音")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.

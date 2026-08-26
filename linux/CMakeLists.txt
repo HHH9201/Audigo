@@ -1,10 +1,12 @@
-# Project-level configuration.
+﻿# Project-level configuration.
 cmake_minimum_required(VERSION 3.10)
 project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "拾音")
+set(BINARY_NAME "audigo")
+# 目标名必须为 ASCII；通过 OUTPUT_NAME 让产物为中文名「拾音」。
+set(APP_OUTPUT_NAME "拾音")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
 set(APPLICATION_ID "com.hjh.audigo")
@@ -68,6 +70,8 @@ add_executable(${BINARY_NAME}
 
 # Apply the standard set of build settings. This can be removed for applications
 # that need different build settings.
+set_target_properties(${BINARY_NAME} PROPERTIES OUTPUT_NAME "${APP_OUTPUT_NAME}")
+
 apply_standard_settings(${BINARY_NAME})
 
 # Add dependency libraries. Add any application-specific dependencies here.
