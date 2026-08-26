@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 
 import 'package:dbus/dbus.dart';
@@ -201,7 +201,7 @@ class MprisService {
         'CanRaise': DBusBoolean(false),
         'HasTrackList': DBusBoolean(false),
         'Identity': DBusString('拾音'),
-        'DesktopEntry': DBusString('musichub'),
+        'DesktopEntry': DBusString('audigo'),
         'SupportedUriSchemes': DBusArray.string(['file', 'http', 'https']),
         'SupportedMimeTypes': DBusArray.string([
           'audio/mpeg',
@@ -490,7 +490,7 @@ class _MprisObject extends DBusObject {
         'CanRaise': DBusBoolean(false),
         'HasTrackList': DBusBoolean(false),
         'Identity': DBusString('拾音'),
-        'DesktopEntry': DBusString('musichub'),
+        'DesktopEntry': DBusString('audigo'),
         'SupportedUriSchemes': DBusArray.string(['file', 'http', 'https']),
         'SupportedMimeTypes': DBusArray.string([
           'audio/mpeg',

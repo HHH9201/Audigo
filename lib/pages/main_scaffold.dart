@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -270,7 +270,7 @@ class _MainScaffoldState extends State<MainScaffold> {
             Row(
               children: [
                 Text(
-                  "Music",
+                  "Audi",
                   style: TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.w500,
@@ -283,7 +283,7 @@ class _MainScaffoldState extends State<MainScaffold> {
                     colors: [Color(0xFFE87A43), Color(0xFFFF955C)],
                   ).createShader(bounds),
                   child: const Text(
-                    "Hub",
+                    "Go",
                     style: TextStyle(
                       fontSize: 19,
                       fontWeight: FontWeight.bold,
