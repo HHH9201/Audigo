@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -28,12 +28,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'auto_play_next': true,
     'gapless_playback': true,
     'wifi_only_high_quality': false,
-    'taskbar_lyrics': false,
     'download_lyrics': true,
     'download_path': '',
     'lyrics_font_size': 22,
-    'lyrics_offset_x': 0,
-    'lyrics_offset_y': 0,
     'save_history': true,
     'analytics_enabled': true,
     'start_minimized': false,
@@ -48,12 +45,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _wifiOnly = false;
   bool _cacheBeforePlay = true; // 先缓存整首再播放；关闭则直接流式播放
   bool _desktopLyrics = true;
-  bool _taskbarLyrics = false;
   bool _downloadLyrics = true;
   String _downloadPath = '';
   int _lyricsFontSize = 22;
-  int _lyricsOffsetX = 0;
-  int _lyricsOffsetY = 0;
   bool _saveHistory = true;
   bool _analytics = true;
   bool _deduping = false;
@@ -92,12 +86,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _wifiOnly = prefs.getBool('wifi_only_high_quality') ?? false;
       _cacheBeforePlay = prefs.getBool('cache_before_play') ?? true;
       _desktopLyrics = prefs.getBool('desktop_lyrics') ?? true;
-      _taskbarLyrics = prefs.getBool('taskbar_lyrics') ?? false;
       _downloadLyrics = prefs.getBool('download_lyrics') ?? true;
       _downloadPath = prefs.getString('download_path') ?? '';
       _lyricsFontSize = prefs.getInt('lyrics_font_size') ?? 22;
-      _lyricsOffsetX = prefs.getInt('lyrics_offset_x') ?? 0;
-      _lyricsOffsetY = prefs.getInt('lyrics_offset_y') ?? 0;
       _saveHistory = prefs.getBool('save_history') ?? true;
       _analytics = prefs.getBool('analytics_enabled') ?? true;
       _startMinimized = prefs.getBool('start_minimized') ?? false;
@@ -169,20 +160,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final percent = (parsed ?? (_volume * 100).round()).clamp(0, 100);
     _volumeController.text = '$percent';
     _saveVolume(percent / 100);
-  }
-
-  Future<void> _setOffsetX(int value) async {
-    final clamped = value.clamp(-300, 300);
-    setState(() => _lyricsOffsetX = clamped);
-    await _saveInt('lyrics_offset_x', clamped);
-    await DesktopLyricsManager.instance.reloadLyricsWindow();
-  }
-
-  Future<void> _setOffsetY(int value) async {
-    final clamped = value.clamp(-60, 60);
-    setState(() => _lyricsOffsetY = clamped);
-    await _saveInt('lyrics_offset_y', clamped);
-    await DesktopLyricsManager.instance.reloadLyricsWindow();
   }
 
   Future<void> _setSaveHistory(bool value) async {
@@ -727,22 +704,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             },
                           ),
                         ),
-                        if (Platform.isWindows)
-                          _settingCell(
-                            icon: Icons.view_week_rounded,
-                            title: '任务栏歌词',
-                            subtitle: '将歌词内嵌到 Windows 任务栏（桌面浮窗可切换）',
-                            horizontal: true,
-                            control: Switch(
-                              value: _taskbarLyrics,
-                              onChanged: (value) {
-                                // 乐观更新：先让开关立即响应，再后台执行内嵌/恢复
-                                setState(() => _taskbarLyrics = value);
-                                DesktopLyricsManager.instance
-                                    .setTaskbarEnabled(value);
-                              },
-                            ),
-                          ),
                         _settingCell(
                           icon: Icons.format_size_rounded,
                           title: '歌词文字大小',
@@ -769,62 +730,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 await _saveInt('lyrics_font_size', size);
                                 await DesktopLyricsManager.instance
                                     .reloadLyricsWindow();
-                              },
-                            ),
-                          ),
-                        ),
-                        _settingCell(
-                          icon: Icons.swap_horiz_rounded,
-                          title: '桌面歌词水平位置',
-                          subtitle: '-300 ~ 300',
-                          horizontal: true,
-                          control: SliderTheme(
-                            data: SliderThemeData(
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(
-                                  enabledThumbRadius: 5),
-                              activeTrackColor: AppTheme.accentOrange,
-                              inactiveTrackColor: AppTheme.borderWarm,
-                              thumbColor: AppTheme.accentOrange,
-                            ),
-                            child: Slider(
-                              value: _lyricsOffsetX.toDouble(),
-                              min: -300,
-                              max: 300,
-                              divisions: 600,
-                              label: '$_lyricsOffsetX',
-                              onChanged: (value) async {
-                                final offset = value.round();
-                                setState(() => _lyricsOffsetX = offset);
-                                await _setOffsetX(offset);
-                              },
-                            ),
-                          ),
-                        ),
-                        _settingCell(
-                          icon: Icons.swap_vert_rounded,
-                          title: '桌面歌词垂直位置',
-                          subtitle: '-60 ~ 60',
-                          horizontal: true,
-                          control: SliderTheme(
-                            data: SliderThemeData(
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(
-                                  enabledThumbRadius: 5),
-                              activeTrackColor: AppTheme.accentOrange,
-                              inactiveTrackColor: AppTheme.borderWarm,
-                              thumbColor: AppTheme.accentOrange,
-                            ),
-                            child: Slider(
-                              value: _lyricsOffsetY.toDouble(),
-                              min: -60,
-                              max: 60,
-                              divisions: 120,
-                              label: '$_lyricsOffsetY',
-                              onChanged: (value) async {
-                                final offset = value.round();
-                                setState(() => _lyricsOffsetY = offset);
-                                await _setOffsetY(offset);
                               },
                             ),
                           ),

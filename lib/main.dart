@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
-import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
@@ -18,7 +17,6 @@ import 'services/music_audio_handler.dart';
 import 'pages/main_scaffold.dart';
 import 'theme/theme_controller.dart';
 import 'widgets/app_toast.dart';
-import 'widgets/desktop_lyrics_window.dart';
 
 /// 是否桌面端。窗口管理、托盘、多窗口歌词等仅桌面功能在此为 true。
 final bool kIsDesktop =
@@ -28,14 +26,6 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   // 初始化 libmpv 播放引擎（just_audio 的 Windows/Linux 平台实现）。
   JustAudioMediaKit.ensureInitialized();
-  if (DesktopLifecycleManager.isSupported) {
-    final controller = await WindowController.fromCurrentEngine();
-    if (controller.arguments == DesktopLyricsManager.windowArgument) {
-      await configureDesktopLyricsWindow();
-      runApp(DesktopLyricsWindow(controller: controller));
-      return;
-    }
-  }
   WindowOptions windowOptions = const WindowOptions(
     size: Size(1280, 800),
     minimumSize: Size(960, 640),

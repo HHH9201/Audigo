@@ -1,46 +1,47 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:desktop_lyrics/desktop_lyrics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'audio_player_manager.dart';
 
+/// 桌面歌词管理器：基于 pub 包 desktop_lyrics 的原生悬浮歌词窗口。
+///
+/// 插件内部自行创建并管理置顶透明窗口（Windows/Linux 原生实现），
+/// 这里只负责：读取偏好 -> 应用样式配置 -> 随播放进度渲染逐字歌词帧。
 class DesktopLyricsManager {
   DesktopLyricsManager._();
 
   static final DesktopLyricsManager instance = DesktopLyricsManager._();
 
   static const preferenceKey = 'desktop_lyrics';
-  static const taskbarPreferenceKey = 'taskbar_lyrics';
-  static const windowArgument = 'desktop_lyrics';
 
   static bool get isSupported =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
   AudioPlayerManager? _player;
-  WindowController? _window;
+  DesktopLyrics? _lyrics;
   bool _enabled = true;
-  bool _taskbarEnabled = false;
-  bool _creating = false;
-  String? _lastSnapshot;
-  DateTime _lastSentAt = DateTime.fromMillisecondsSinceEpoch(0);
-  Timer? _sendTimer;
+  double _fontSize = 22;
+  Timer? _renderTimer;
+  bool _rendering = false;
+  String? _lastFrameKey;
 
   bool get enabled => _enabled;
-  bool get taskbarEnabled => _taskbarEnabled;
 
   Future<void> initialize(AudioPlayerManager player) async {
     if (!isSupported) return;
     _player = player;
     final preferences = await SharedPreferences.getInstance();
     _enabled = preferences.getBool(preferenceKey) ?? true;
-    _taskbarEnabled =
-        preferences.getBool(taskbarPreferenceKey) ?? false;
+    _fontSize = (preferences.getInt('lyrics_font_size') ?? 22)
+        .clamp(12, 48)
+        .toDouble();
+    _lyrics = DesktopLyrics();
+    await _applyConfig();
     player.addListener(_handlePlayerChanged);
-    if (_enabled) await show();
   }
 
   Future<void> setEnabled(bool value) async {
@@ -49,191 +50,136 @@ class DesktopLyricsManager {
     await _applyEnabled(value);
   }
 
-  /// 切换任务栏内嵌与否（桌面浮窗 <-> 内嵌任务栏）。仅 Windows 生效。
-  Future<void> setTaskbarEnabled(bool value) async {
-    _taskbarEnabled = value;
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool(taskbarPreferenceKey, value);
-    await _applyTaskbar();
-  }
+  Future<void> toggle() => setEnabled(!_enabled);
 
+  /// 设置变化后重新应用配置（字号等）。
   Future<void> reloadSettings() async {
     if (!isSupported) return;
     final preferences = await SharedPreferences.getInstance();
-    _taskbarEnabled =
-        preferences.getBool(taskbarPreferenceKey) ?? false;
+    _fontSize = (preferences.getInt('lyrics_font_size') ?? 22)
+        .clamp(12, 48)
+        .toDouble();
     await _applyEnabled(preferences.getBool(preferenceKey) ?? true);
   }
 
-  /// 字号/位置设置变化后重建歌词窗口以应用新配置。
-  Future<void> reloadLyricsWindow() async {
-    if (!isSupported || !_enabled) return;
-    await close();
-    await Future<void>.delayed(const Duration(milliseconds: 120));
-    await show();
-  }
-
-  Future<void> toggle() => setEnabled(!_enabled);
-
-  /// 根据 _taskbarEnabled 决定把歌词窗口内嵌到任务栏还是恢复成桌面浮窗。
-  Future<void> _applyTaskbar() async {
-    if (!isSupported || !_enabled || _window == null) return;
-    final method = _taskbarEnabled ? 'lyrics_attach' : 'lyrics_detach';
-    // 窗口引擎就绪需要一点时间，失败重试几次。
-    for (final delay in const [
-      Duration(milliseconds: 120),
-      Duration(milliseconds: 300),
-      Duration(milliseconds: 700),
-    ]) {
-      await Future<void>.delayed(delay);
-      try {
-        final window = _window;
-        if (window == null) return;
-        final result =
-            await window.invokeMethod<Map>('$method', null);
-        if (result is Map && result['attached'] == true) {
-          if (_taskbarEnabled) {
-            debugPrint('任务栏歌词已嵌入 Windows 任务栏');
-          } else {
-            debugPrint('任务栏歌词已恢复为桌面浮窗');
-          }
-          return;
-        }
-      } catch (error) {
-        debugPrint('歌词窗口切换任务栏状态失败: $error');
-      }
-    }
-  }
+  /// 兼容旧调用点：字号变化后重新应用配置即可，无需重建窗口。
+  Future<void> reloadLyricsWindow() => reloadSettings();
 
   Future<void> _applyEnabled(bool value) async {
     _enabled = value;
-    if (value) {
-      await show();
+    await _applyConfig();
+    if (!value) {
+      _renderTimer?.cancel();
+      _renderTimer = null;
     } else {
-      await hide();
+      _renderFrame();
     }
   }
 
-  Future<void> show() async {
-    if (!isSupported || _creating) return;
-    final existing = _window;
-    if (existing != null) {
-      await existing.show();
-      unawaited(_sendSnapshotWhenReady());
-      return;
-    }
-
-    _creating = true;
+  Future<void> _applyConfig() async {
+    final lyrics = _lyrics;
+    if (lyrics == null) return;
     try {
-      final windows = await WindowController.getAll();
-      for (final window in windows) {
-        if (window.arguments == windowArgument) {
-          _window = window;
-          await window.show();
-          unawaited(_sendSnapshotWhenReady());
-          return;
-        }
-      }
-      _window = await WindowController.create(
-        const WindowConfiguration(
-          arguments: windowArgument,
-          hiddenAtLaunch: true,
+      await lyrics.apply(
+        lyrics.state.copyWith(
+          interaction: lyrics.state.interaction.copyWith(
+            enabled: _enabled,
+            clickThrough: false,
+          ),
+          text: lyrics.state.text.copyWith(fontSize: _fontSize),
+          background: lyrics.state.background.copyWith(opacity: 0.85),
+          layout: lyrics.state.layout.copyWith(overlayWidth: 760),
         ),
       );
-      await _window!.show();
-      unawaited(_sendSnapshotWhenReady());
     } catch (error) {
-      debugPrint('创建桌面歌词窗口失败: $error');
-      _window = null;
-    } finally {
-      _creating = false;
+      debugPrint('应用桌面歌词配置失败: $error');
     }
-  }
-
-  Future<void> _sendSnapshotWhenReady() async {
-    for (final delay in const [
-      Duration(milliseconds: 120),
-      Duration(milliseconds: 300),
-      Duration(milliseconds: 700),
-      Duration(seconds: 1),
-    ]) {
-      await Future<void>.delayed(delay);
-      await _sendSnapshot(force: true);
-    }
-  }
-
-  Future<void> hide() async {
-    try {
-      await _window?.hide();
-    } catch (error) {
-      debugPrint('隐藏桌面歌词窗口失败: $error');
-      _window = null;
-    }
-  }
-
-  Future<void> close() async {
-    _sendTimer?.cancel();
-    _sendTimer = null;
-    final window = _window;
-    _window = null;
-    if (window == null) return;
-    try {
-      await window.invokeMethod<void>('close');
-    } catch (_) {}
   }
 
   void _handlePlayerChanged() {
     if (!_enabled) return;
-    if (_window == null) {
-      unawaited(show());
-      return;
-    }
-    final elapsed = DateTime.now().difference(_lastSentAt);
+    // 播放器每 500ms 高频通知；歌词帧渲染节流至 ~100ms。
+    final elapsed = DateTime.now().difference(_lastRenderAt);
     const interval = Duration(milliseconds: 100);
     if (elapsed >= interval) {
-      _sendTimer?.cancel();
-      _sendTimer = null;
-      unawaited(_sendSnapshot());
+      _renderTimer?.cancel();
+      _renderTimer = null;
+      _renderFrame();
       return;
     }
-    _sendTimer ??= Timer(interval - elapsed, () {
-      _sendTimer = null;
-      unawaited(_sendSnapshot());
+    _renderTimer ??= Timer(interval - elapsed, () {
+      _renderTimer = null;
+      _renderFrame();
     });
   }
 
-  Future<void> _sendSnapshot({bool force = false}) async {
+  DateTime _lastRenderAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Future<void> _renderFrame() async {
     final player = _player;
-    final window = _window;
-    if (player == null || window == null) return;
+    final lyrics = _lyrics;
+    if (player == null || lyrics == null || !_enabled || _rendering) return;
+    _rendering = true;
+    _lastRenderAt = DateTime.now();
+    try {
+      final frame = _buildFrame(player);
+      // 内容未变化时跳过渲染，避免高频无效调用。
+      final key =
+          '${frame.currentLine}|${(frame.lineProgress ?? 0).toStringAsFixed(3)}';
+      if (key == _lastFrameKey) return;
+      _lastFrameKey = key;
+      await lyrics.render(frame);
+    } catch (error) {
+      debugPrint('渲染桌面歌词失败: $error');
+    } finally {
+      _rendering = false;
+    }
+  }
 
-    final now = DateTime.now();
-    if (!force && now.difference(_lastSentAt).inMilliseconds < 100) return;
-
+  DesktopLyricsFrame _buildFrame(AudioPlayerManager player) {
     final lyrics = player.currentLyrics;
     final index = lyrics.isEmpty
         ? -1
         : player.currentLyricIndex.clamp(0, lyrics.length - 1);
-    final line = index >= 0 ? lyrics[index] : null;
-    final snapshot = jsonEncode({
-      'song': player.currentSong?.songName ?? '',
-      'artist': player.currentSong?.authorName ?? '',
-      'playing': player.isPlaying,
-      'line': line?.text ?? '',
-      'nextLine':
-          index >= 0 && index + 1 < lyrics.length ? lyrics[index + 1].text : '',
-      'words': line?.words.map((word) => word.text).toList() ?? const [],
-      'wordIndex': player.currentLyricWordIndex,
-      'wordProgress': player.currentLyricWordProgress,
-    });
-    if (!force && snapshot == _lastSnapshot) return;
-    _lastSnapshot = snapshot;
-    _lastSentAt = now;
-
-    try {
-      await window.invokeMethod<void>('lyrics_update', snapshot);
-    } catch (_) {
-      // The secondary engine may still be registering its method handler.
+    if (index < 0) {
+      final song = player.currentSong;
+      final text = song != null
+          ? '${song.songName}  ${song.authorName}'
+          : '拾音';
+      return DesktopLyricsFrame.line(currentLine: text, lineProgress: 0);
     }
+
+    final line = lyrics[index];
+    final words = line.words;
+    if (words.isEmpty) {
+      return DesktopLyricsFrame.line(
+        currentLine: line.text,
+        lineProgress: 0,
+      );
+    }
+
+    // 逐字卡拉OK：token 时间轴相对行起点，position 为当前行内进度。
+    final position = player.currentPosition - line.time;
+    final tokens = <DesktopLyricsTimelineToken>[
+      for (final word in words)
+        DesktopLyricsTimelineToken(
+          text: word.text,
+          start: word.time - line.time,
+          end: word.time - line.time + word.duration,
+        ),
+    ];
+    return DesktopLyricsFrame.fromKaraokeTimeline(
+      position: position,
+      tokens: tokens,
+    );
+  }
+
+  Future<void> close() async {
+    _renderTimer?.cancel();
+    _renderTimer = null;
+    _player?.removeListener(_handlePlayerChanged);
+    final lyrics = _lyrics;
+    _lyrics = null;
+    lyrics?.dispose();
   }
 }

@@ -1,4 +1,4 @@
-﻿name: audigo
+name: audigo
 description: "拾音 AudiGo - 让声音随行。跨平台全能音乐播放器客户端 (Flutter/Dart)"
 homepage: https://github.com/HHH9201/AudiGo
 repository: https://github.com/HHH9201/AudiGo
@@ -47,8 +47,8 @@ dependencies:
   audio_metadata_reader: 1.7.1
   crypto: ^3.0.7
   tray_manager: ^0.5.3
-  desktop_multi_window: ^0.3.0
-  screen_retriever: ^0.1.9
+  # 桌面悬浮歌词（原生置顶窗口 + 逐字卡拉OK进度，pub.dev: desktop_lyrics）
+  desktop_lyrics: ^0.0.8
   hotkey_manager: ^0.2.3
   dbus: ^0.7.15
 
