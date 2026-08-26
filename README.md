@@ -1,4 +1,4 @@
-﻿# 拾音 (Audigo)
+﻿# 拾音 (AudiGo)
 
 让声音随行。拾音 的 Flutter 跨平台客户端。
 

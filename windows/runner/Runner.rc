@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 #include "resource.h"
@@ -90,9 +90,9 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "HJH" "\0"
-            VALUE "FileDescription", "拾音 Audigo - 让声音随行" "\0"
+            VALUE "FileDescription", "拾音 AudiGo - 让声音随行" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "Audigo" "\0"
+            VALUE "InternalName", "AudiGo" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 HJH. All rights reserved." "\0"
             VALUE "OriginalFilename", "拾音.exe" "\0"
             VALUE "ProductName", "拾音" "\0"

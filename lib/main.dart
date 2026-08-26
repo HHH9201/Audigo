@@ -70,7 +70,7 @@ Future<void> main(List<String> args) async {
         ChangeNotifierProvider.value(value: audioPlayerManager),
         ChangeNotifierProvider.value(value: themeController),
       ],
-      child: const AudigoApp(),
+      child: const AudiGoApp(),
     ),
   );
 }
@@ -113,8 +113,8 @@ Future<void> _initializeDeferredServices(
   }
 }
 
-class AudigoApp extends StatelessWidget {
-  const AudigoApp({super.key});
+class AudiGoApp extends StatelessWidget {
+  const AudiGoApp({super.key});
 
   @override
   Widget build(BuildContext context) {

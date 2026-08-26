@@ -915,7 +915,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ], description: '本地数据记录开关'),
                 _sectionPlain('关于拾音', [
                   Text(
-                    '拾音 Audigo - 让声音随行',
+                    '拾音 AudiGo - 让声音随行',
                     style:
                         TextStyle(fontSize: 13, color: AppTheme.textSecondary),
                   ),

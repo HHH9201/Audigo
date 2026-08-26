@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -269,7 +269,7 @@ void main() {
     expect(prefs.getStringList('download_records'), isNull);
   });
 
-  testWidgets('AudigoApp smoke test', (WidgetTester tester) async {
+  testWidgets('AudiGoApp smoke test', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.binding.setSurfaceSize(const Size(1280, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -282,12 +282,12 @@ void main() {
           ChangeNotifierProvider(create: (_) => AudioPlayerManager()),
           ChangeNotifierProvider.value(value: themeController),
         ],
-        child: const AudigoApp(),
+        child: const AudiGoApp(),
       ),
     );
     await tester.pump();
 
-    expect(find.byType(AudigoApp), findsOneWidget);
+    expect(find.byType(AudiGoApp), findsOneWidget);
     expect(find.text('首页'), findsOneWidget);
   });
 }
