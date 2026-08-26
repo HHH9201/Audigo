@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -49,7 +49,7 @@ class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
     if (!Platform.isWindows) {
       return {'attached': false, 'error': 'unsupported'};
     }
-    const channel = MethodChannel('musichub/taskbar_lyrics');
+    const channel = MethodChannel('audigo/taskbar_lyrics');
     try {
       final result = await channel.invokeMethod<dynamic>(
           attach ? 'attach' : 'detach');
@@ -283,7 +283,7 @@ Future<void> configureDesktopLyricsWindow() async {
 }
 
 Future<void> attachToWindowsTaskbar() async {
-  const channel = MethodChannel('musichub/taskbar_lyrics');
+  const channel = MethodChannel('audigo/taskbar_lyrics');
   for (final delay in const [
     Duration(milliseconds: 80),
     Duration(milliseconds: 180),

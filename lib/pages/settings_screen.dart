@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -933,7 +933,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'GitHub: https://github.com/HHH9201/MusicHub',
+                    'GitHub: https://github.com/HHH9201/AudiGo',
                     style:
                         TextStyle(fontSize: 13, color: AppTheme.textSecondary),
                   ),

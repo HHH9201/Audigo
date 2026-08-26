@@ -1,7 +1,7 @@
-name: audigo
+﻿name: audigo
 description: "拾音 Audigo - 让声音随行。跨平台全能音乐播放器客户端 (Flutter/Dart)"
-homepage: https://github.com/HHH9201/MusicHub
-repository: https://github.com/HHH9201/MusicHub
+homepage: https://github.com/HHH9201/AudiGo
+repository: https://github.com/HHH9201/AudiGo
 publish_to: 'none'
 version: 1.0.0+1
 

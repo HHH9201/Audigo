@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
@@ -92,7 +92,7 @@ Future<void> _initializeDeferredServices(
       AudioService.init(
         builder: () => MusicAudioHandler(audioPlayerManager),
         config: const AudioServiceConfig(
-          androidNotificationChannelId: 'com.hjh.musichub.playback',
+          androidNotificationChannelId: 'com.hjh.audigo.playback',
           androidNotificationChannelName: '音乐播放',
           androidNotificationOngoing: true,
         ),

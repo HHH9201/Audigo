@@ -1,4 +1,4 @@
-#include "taskbar_lyrics_plugin.h"
+﻿#include "taskbar_lyrics_plugin.h"
 
 #include <flutter/encodable_value.h>
 #include <flutter/method_channel.h>
@@ -107,7 +107,7 @@ class TaskbarLyricsPlugin : public flutter::Plugin {
   explicit TaskbarLyricsPlugin(flutter::PluginRegistrarWindows* registrar)
       : registrar_(registrar) {
     channel_ = std::make_unique<flutter::MethodChannel<>>(
-        registrar_->messenger(), "musichub/taskbar_lyrics",
+        registrar_->messenger(), "audigo/taskbar_lyrics",
         &flutter::StandardMethodCodec::GetInstance());
     channel_->SetMethodCallHandler(
         [this](const flutter::MethodCall<>& call,
