@@ -1,3 +1,4 @@
+﻿import 'dart:convert';
 import 'package:dio/dio.dart';
 
 /// Meting 备用播放源客户端。
@@ -15,11 +16,15 @@ class MetingSong {
   final String album;
   final String id;
 
+  /// 封面代理地址（meting ?type=pic 302 到 CDN，可直接作为 Image URL）。
+  final String pic;
+
   const MetingSong({
     required this.name,
     required this.artist,
     required this.album,
     required this.id,
+    this.pic = '',
   });
 
   factory MetingSong.fromJson(Map<String, dynamic> json) => MetingSong(
@@ -27,6 +32,7 @@ class MetingSong {
         artist: (json['artist'] as String?) ?? '',
         album: (json['album'] as String?) ?? '',
         id: (json['id']?.toString()) ?? '',
+        pic: (json['pic'] as String?) ?? '',
       );
 
   @override
@@ -52,6 +58,81 @@ class MetingApiService {
     },
   ));
 
+  /// 搜索并按「原唱优先」启发式重排。
+  ///
+  /// netease 源的搜索相关性对原唱不友好（翻唱/Live/DJ 版常排在前面，
+  /// 例如搜「晴天 周杰伦」首条是翻唱），这里按以下信号重排：
+  ///  - 歌名/歌手含「原唱」标记（如「晴天 (原唱 周杰伦)」）几乎必是翻唱，重罚
+  ///  - 括号内含 Live/DJ/版/女声/男声/翻唱/伴奏 等版本词罚分
+  ///  - 搜索词含歌手段时，歌手精确匹配强加分（合作曲目次之，不匹配罚分）
+  ///  - 歌名与搜索词歌名段精确相等加分
+  ///  - 同分时保持网易云原始相关性顺序（含信息量，做稳定 tie-breaker）
+  static Future<List<MetingSong>> searchRanked(String query) async {
+    final results = await search(query);
+    if (results.length < 2) return results;
+
+    // 约定搜索词为「歌名 歌手」或纯歌名。
+    final parts = query.trim().split(RegExp(r'\s+'));
+    final nameQuery = parts.isNotEmpty ? parts.first : '';
+    final artistQuery = parts.length > 1 ? parts.sublist(1).join(' ') : '';
+
+    final indexed = List<int>.generate(results.length, (i) => i);
+    indexed.sort((a, b) {
+      final sa = _originalScore(results[a], nameQuery, artistQuery, a);
+      final sb = _originalScore(results[b], nameQuery, artistQuery, b);
+      return sb.compareTo(sa);
+    });
+    return [for (final i in indexed) results[i]];
+  }
+
+  /// 原唱优先评分，分数越高越靠前。
+  static int _originalScore(
+    MetingSong song,
+    String nameQuery,
+    String artistQuery,
+    int index,
+  ) {
+    var score = 0;
+    final name = song.name.toLowerCase();
+    final artist = song.artist.toLowerCase();
+    final nq = nameQuery.toLowerCase();
+    final aq = artistQuery.toLowerCase();
+
+    // 翻唱强信号：「(原唱 周杰伦)」这类标记几乎必是翻唱。
+    if (name.contains('原唱') || artist.contains('原唱')) score -= 100;
+
+    // 括号内的版本/二创标记（女声版、DJ版、Live、伴奏……）。
+    if (RegExp(
+            r'[（(][^)）]*(live|dj|版|女声|男声|深情|钢琴|吉他|remix|cover|翻|伴奏|铃声|片段|串烧)[^)）]*[)）]')
+        .hasMatch(name)) {
+      score -= 40;
+    }
+
+    // 歌手匹配：搜索词带歌手段时精确匹配最优。
+    if (aq.isNotEmpty) {
+      if (artist == aq) {
+        score += 100;
+      } else if (artist.contains(aq) || aq.contains(artist)) {
+        // 合作曲目（如「周杰伦/温岚」）。
+        score += 70;
+      } else {
+        score -= 60;
+      }
+    }
+
+    // 歌名匹配：精确相等最优，前缀匹配次之。
+    if (nq.isNotEmpty) {
+      if (name == nq) {
+        score += 30;
+      } else if (name.startsWith(nq)) {
+        score += 15;
+      }
+    }
+
+    // 原始相关性做稳定排序的 tie-breaker。
+    return score * 1000 - index;
+  }
+
   /// 按关键字搜索（建议 "歌名 歌手"）。
   static Future<List<MetingSong>> search(String query) async {
     if (query.trim().isEmpty) return const [];
@@ -61,7 +142,16 @@ class MetingApiService {
         'type': 'search',
         'id': query,
       });
-      final data = resp.data;
+      // 自建 meting 返回 Content-Type "application/json; charset=utf-8;"
+      // （结尾多一个分号），dio 不会自动解码为 List，需手动 jsonDecode。
+      dynamic data = resp.data;
+      if (data is String) {
+        try {
+          data = jsonDecode(data);
+        } catch (_) {
+          return const [];
+        }
+      }
       if (data is List) {
         return data
             .whereType<Map>()
@@ -152,7 +242,7 @@ class MetingApiService {
     if (name.isEmpty) return null;
 
     final query = artist.trim().isNotEmpty ? '$name $artist' : name;
-    final results = await search(query);
+    final results = await searchRanked(query);
     if (results.isEmpty) return null;
 
     for (final song in results) {

@@ -56,6 +56,10 @@ class MusicApiService {
     defaultValue: 'https://localhost:40000',
   );
 
+  /// Meting 源歌曲的 hash 前缀（后接网易云歌曲 id）。
+  /// 播放/歌词/下载链路据此分流到 Meting（未登录匿名链路）。
+  static const String metingHashPrefix = 'meting:';
+
   // 云网关鉴权 token（与原版 Go config.go 的 apiToken 一致）
   static const String apiToken =
       "768b27f839b768c39fa3c23b9f6c5a8c620763bb322968a589ced243f7e1803b";
@@ -513,12 +517,58 @@ class MusicApiService {
 
   static Future<SearchPage<Song>> searchSongPage(String keyword,
       {int page = 1, int pageSize = 30}) async {
+    // 未登录：酷狗上游对匿名请求风控严格（搜索/播放常被拦），
+    // 默认走 Meting（网易云源）匿名搜索，原唱优先排序。
+    if (!(await isLoggedIn())) {
+      final metingResult = await _searchSongsByMeting(keyword,
+          page: page, pageSize: pageSize);
+      if (metingResult.items.isNotEmpty) return metingResult;
+    }
     // 主路径：/search?type=song（酷狗 v1，Go 版验证可用的路径，解析 data.lists 的大写字段）
     final songResult =
         await _searchSongsByTypeSong(keyword, page: page, pageSize: pageSize);
     if (songResult.items.isNotEmpty) return songResult;
+    // 已登录但酷狗仍失败（风控/网关故障）时，降级 Meting 保证可用。
+    final metingFallback = await _searchSongsByMeting(keyword,
+        page: page, pageSize: pageSize);
+    if (metingFallback.items.isNotEmpty) return metingFallback;
     // 兜底：/search/complex
     return _searchSongsByComplex(keyword, page: page, pageSize: pageSize);
+  }
+
+  /// Meting 搜索结果缓存（关键词 -> 全量 Song），用于客户端分页。
+  /// Meting 一次返回约 30 条且无分页参数，翻页靠本地切片。
+  static final Map<String, List<Song>> _metingSearchCache = {};
+
+  /// Meting 匿名搜索（未登录主路径 / 酷狗失败兜底），原唱优先。
+  static Future<SearchPage<Song>> _searchSongsByMeting(String keyword,
+      {int page = 1, int pageSize = 30}) async {
+    if (keyword.trim().isEmpty) return const SearchPage(items: [], total: 0);
+    try {
+      var all = _metingSearchCache[keyword];
+      if (all == null) {
+        final results = await MetingApiService.searchRanked(keyword);
+        if (results.isEmpty) return const SearchPage(items: [], total: 0);
+        all = results
+            .map((m) => Song(
+                  hash: '$metingHashPrefix${m.id}',
+                  songName: m.name,
+                  authorName: m.artist,
+                  albumName: m.album,
+                  albumId: '',
+                  coverUrl: m.pic.isEmpty ? null : m.pic,
+                ))
+            .toList();
+        _metingSearchCache[keyword] = all;
+      }
+      final start = (page - 1) * pageSize;
+      if (start >= all.length) {
+        return const SearchPage(items: [], total: 0);
+      }
+      final items = all.skip(start).take(pageSize).toList();
+      return SearchPage(items: items, total: all.length);
+    } catch (_) {}
+    return const SearchPage(items: [], total: 0);
   }
 
   /// 酷狗 v1 /search?type=song：返回 data.lists，字段为大写（FileHash/OriSongName/...）。
@@ -858,6 +908,12 @@ class MusicApiService {
     String quality = '128k',
   }) async {
     if (hash.trim().isEmpty) return [];
+    // Meting 源（未登录匿名搜索的结果）：直取网易云直链，不走酷狗。
+    if (hash.startsWith(metingHashPrefix)) {
+      final url = await MetingApiService
+          .getPlayUrl(hash.substring(metingHashPrefix.length));
+      return url == null ? const <String>[] : [url];
+    }
     final normalizedQuality = _normalizeAudioQuality(quality);
     final qualityChain = normalizedQuality == 'flac'
         ? const ['flac', '320', '128']
@@ -929,6 +985,14 @@ class MusicApiService {
   }) async {
     if (hash.trim().isEmpty) {
       return (urls: <String>[], lyrics: '');
+    }
+    // Meting 源：直链 + 网易云 LRC 一次取齐。
+    if (hash.startsWith(metingHashPrefix)) {
+      final id = hash.substring(metingHashPrefix.length);
+      final url = await MetingApiService.getPlayUrl(id);
+      if (url == null) return (urls: <String>[], lyrics: '');
+      final lyrics = await MetingApiService.getLyrics(id) ?? '';
+      return (urls: [url], lyrics: lyrics);
     }
     final normalizedQuality = _normalizeAudioQuality(quality);
     final qualityChain = normalizedQuality == 'flac'
@@ -1465,7 +1529,10 @@ class MusicApiService {
     final playUrl = await getPlayUrl(song.hash, quality: effectiveQuality);
     if (playUrl == null || playUrl.isEmpty) return null;
 
-    final extension = effectiveQuality == 'flac' ? '.flac' : '.mp3';
+    // Meting 源（网易云直链）固定 mp3，不随音质设置变化。
+    final extension = song.hash.startsWith(metingHashPrefix)
+        ? '.mp3'
+        : (effectiveQuality == 'flac' ? '.flac' : '.mp3');
     final filename = _safeFilename(
       '${song.songName} - ${song.authorName}$extension',
     );
@@ -1594,6 +1661,12 @@ class MusicApiService {
   static Future<String> _loadRawLyrics(String hash,
       {String songName = '', String artist = ''}) async {
     var content = '';
+    // Meting 源：直接取网易云 LRC。
+    if (hash.startsWith(metingHashPrefix)) {
+      return await MetingApiService
+              .getLyrics(hash.substring(metingHashPrefix.length)) ??
+          '';
+    }
     final cookie = await _getCookie();
     try {
       final search = await _dio.get('$baseApi/search/lyric', queryParameters: {
