@@ -1,11 +1,11 @@
 {
-    "name": "MusicHub",
-    "short_name": "MusicHub",
+    "name": "拾音 Audigo - 让声音随行",
+    "short_name": "拾音",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FCF9F6",
     "theme_color": "#E87A43",
-    "description": "MusicHub - HJH 开发的跨平台音乐播放器。",
+    "description": "拾音 Audigo - 让声音随行。HJH 开发的跨平台音乐播放器。",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

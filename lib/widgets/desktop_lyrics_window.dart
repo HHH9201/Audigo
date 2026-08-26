@@ -83,7 +83,7 @@ class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
         ? _snapshot.line
         : _snapshot.song.isNotEmpty
             ? '${_snapshot.song}  ${_snapshot.artist}'
-            : 'MusicHub';
+            : '拾音';
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(

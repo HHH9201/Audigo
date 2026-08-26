@@ -3,13 +3,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import 'package:flutter_client/main.dart';
-import 'package:flutter_client/models/play_history.dart';
-import 'package:flutter_client/models/song.dart';
-import 'package:flutter_client/pages/local_music_screen.dart';
-import 'package:flutter_client/services/audio_player_manager.dart';
-import 'package:flutter_client/services/music_api_service.dart';
-import 'package:flutter_client/theme/theme_controller.dart';
+import 'package:audigo/main.dart';
+import 'package:audigo/models/play_history.dart';
+import 'package:audigo/models/song.dart';
+import 'package:audigo/pages/local_music_screen.dart';
+import 'package:audigo/services/audio_player_manager.dart';
+import 'package:audigo/services/music_api_service.dart';
+import 'package:audigo/theme/theme_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -269,7 +269,7 @@ void main() {
     expect(prefs.getStringList('download_records'), isNull);
   });
 
-  testWidgets('MusicHubApp smoke test', (WidgetTester tester) async {
+  testWidgets('AudigoApp smoke test', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.binding.setSurfaceSize(const Size(1280, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -282,12 +282,12 @@ void main() {
           ChangeNotifierProvider(create: (_) => AudioPlayerManager()),
           ChangeNotifierProvider.value(value: themeController),
         ],
-        child: const MusicHubApp(),
+        child: const AudigoApp(),
       ),
     );
     await tester.pump();
 
-    expect(find.byType(MusicHubApp), findsOneWidget);
+    expect(find.byType(AudigoApp), findsOneWidget);
     expect(find.text('首页'), findsOneWidget);
   });
 }

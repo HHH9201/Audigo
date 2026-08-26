@@ -70,7 +70,7 @@ Future<void> main(List<String> args) async {
         ChangeNotifierProvider.value(value: audioPlayerManager),
         ChangeNotifierProvider.value(value: themeController),
       ],
-      child: const MusicHubApp(),
+      child: const AudigoApp(),
     ),
   );
 }
@@ -113,15 +113,15 @@ Future<void> _initializeDeferredServices(
   }
 }
 
-class MusicHubApp extends StatelessWidget {
-  const MusicHubApp({super.key});
+class AudigoApp extends StatelessWidget {
+  const AudigoApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     final theme = context.watch<ThemeController>();
     return MaterialApp(
       navigatorKey: DesktopLifecycleManager.instance.navigatorKey,
-      title: 'MusicHub',
+      title: '拾音',
       debugShowCheckedModeBanner: false,
       theme: theme.theme,
       home: const MainScaffold(),

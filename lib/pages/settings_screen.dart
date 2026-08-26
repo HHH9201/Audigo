@@ -555,7 +555,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          '管理播放、音质、界面与下载等偏好，让 MusicHub 更贴合你的习惯。',
+          '管理播放、音质、界面与下载等偏好，让拾音更贴合你的习惯。',
           style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
         ),
         const SizedBox(height: 24),
@@ -913,7 +913,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ], description: '本地数据记录开关'),
-                _sectionPlain('关于 MusicHub', [
+                _sectionPlain('关于拾音', [
+                  Text(
+                    '拾音 Audigo - 让声音随行',
+                    style:
+                        TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                  ),
+                  const SizedBox(height: 6),
                   Text(
                     '版本: 1.0.0',
                     style:

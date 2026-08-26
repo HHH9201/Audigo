@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter_client/services/media_cache_service.dart';
+import 'package:audigo/services/media_cache_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

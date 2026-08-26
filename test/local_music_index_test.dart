@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter_client/services/local_music_index.dart';
+import 'package:audigo/services/local_music_index.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

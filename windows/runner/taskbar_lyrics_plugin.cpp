@@ -76,7 +76,7 @@ void ReportResult(const char* operation, bool success, const std::string& error,
        << (has_taskbar_client ? taskbar_client.bottom : 0) << "]}}";
   const std::string body = data.str();
 
-  HINTERNET session = WinHttpOpen(L"MusicHub taskbar lyrics probe/1.0",
+  HINTERNET session = WinHttpOpen(L"Audigo taskbar lyrics probe/1.0",
                                   WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                   WINHTTP_NO_PROXY_NAME,
                                   WINHTTP_NO_PROXY_BYPASS, 0);

@@ -12,7 +12,7 @@ import 'audio_player_manager.dart';
 /// 原版 Go 版本通过 `mprisservice.go` + `frontend/mpris-integration.js` 在 Linux
 /// 上向桌面环境（GNOME/KDE 等）暴露媒体控制接口，使系统媒体控制、锁屏卡片、
 /// 快捷键可以播放/暂停/切歌/跳转/调音量。本类是其在 Flutter 端的纯 Dart 实现，
-/// 基于 `dbus` 包在会话总线上导出 `org.mpris.MediaPlayer2.MusicHub` 服务。
+/// 基于 `dbus` 包在会话总线上导出 `org.mpris.MediaPlayer2.audigo` 服务。
 ///
 /// 仅在 Linux 平台启用。
 class MprisService {
@@ -21,7 +21,7 @@ class MprisService {
   static final MprisService instance = MprisService._();
 
   /// 总线名称与对象路径（与原版 Go 一致）。
-  static const String busName = 'org.mpris.MediaPlayer2.MusicHub';
+  static const String busName = 'org.mpris.MediaPlayer2.audigo';
   static const String objectPath = '/org/mpris/MediaPlayer2';
   static const String rootInterface = 'org.mpris.MediaPlayer2';
   static const String playerInterface = 'org.mpris.MediaPlayer2.Player';
@@ -200,7 +200,7 @@ class MprisService {
         'CanQuit': DBusBoolean(false),
         'CanRaise': DBusBoolean(false),
         'HasTrackList': DBusBoolean(false),
-        'Identity': DBusString('MusicHub'),
+        'Identity': DBusString('拾音'),
         'DesktopEntry': DBusString('musichub'),
         'SupportedUriSchemes': DBusArray.string(['file', 'http', 'https']),
         'SupportedMimeTypes': DBusArray.string([
@@ -489,7 +489,7 @@ class _MprisObject extends DBusObject {
         'CanQuit': DBusBoolean(false),
         'CanRaise': DBusBoolean(false),
         'HasTrackList': DBusBoolean(false),
-        'Identity': DBusString('MusicHub'),
+        'Identity': DBusString('拾音'),
         'DesktopEntry': DBusString('musichub'),
         'SupportedUriSchemes': DBusArray.string(['file', 'http', 'https']),
         'SupportedMimeTypes': DBusArray.string([

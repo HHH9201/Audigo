@@ -36,7 +36,7 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
         ? 'windows/runner/resources/app_icon.ico'
         : 'macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_32.png';
     await trayManager.setIcon(iconPath);
-    await trayManager.setToolTip('MusicHub');
+    await trayManager.setToolTip('拾音');
     await _updateTrayMenu(force: true);
   }
 
@@ -95,7 +95,7 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
     final result = await showDialog<_CloseChoice>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('关闭 MusicHub'),
+        title: const Text('关闭 拾音'),
         content: const Text('要最小化到系统托盘，还是退出播放器？'),
         actions: [
           TextButton(
@@ -139,7 +139,7 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
       Menu(
         items: [
           MenuItem(
-            label: song == null ? 'MusicHub' : song.songName,
+            label: song == null ? '拾音' : song.songName,
             disabled: true,
           ),
           MenuItem.separator(),
@@ -170,7 +170,7 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
             key: 'desktop_lyrics',
             label: DesktopLyricsManager.instance.enabled ? '隐藏桌面歌词' : '显示桌面歌词',
           ),
-          MenuItem(key: 'show', label: '显示 MusicHub'),
+          MenuItem(key: 'show', label: '显示 拾音'),
           MenuItem(key: 'exit', label: '退出'),
         ],
       ),

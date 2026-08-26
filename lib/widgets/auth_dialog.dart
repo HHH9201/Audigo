@@ -550,7 +550,7 @@ class _AuthDialogState extends State<AuthDialog> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              "登录 MusicHub",
+              "登录拾音",
               style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
