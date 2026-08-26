@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -505,9 +505,9 @@ class AudioPlayerManager extends ChangeNotifier {
     if (requestId != _playRequestId) return;
     if (urls.isEmpty) {
       print('播放调试: 无法获取播放URL，播放中止');
-      // 未登录且本地也没有该音频时，前端提示未登录。
+      // 酷狗与 Meting 兜底均未拿到播放地址。
       if (!await MusicApiService.isLoggedIn()) {
-        _showNotice('未登录：本地没有该歌曲，请登录后再播放在线歌曲');
+        _showNotice('未能获取播放地址（版权受限或网络原因），登录后可尝试更高音质');
       }
       _processingState = ProcessingState.idle;
       notifyListeners();

@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -936,8 +936,17 @@ class MusicApiService {
                 .contains(artist.trim().toLowerCase())) {
           continue;
         }
-        final alternative =
-            await _requestPlayUrls(candidate.hash, qualityChain, cookie);
+        // 未登录时 searchSongs 返回的是 Meting 源候选（meting: 前缀），
+        // 需走 Meting 拿直链，不能拿去请求酷狗接口。
+        List<String> alternative;
+        if (candidate.hash.startsWith(metingHashPrefix)) {
+          final url = await MetingApiService.getPlayUrl(
+              candidate.hash.substring(metingHashPrefix.length));
+          alternative = url == null ? const <String>[] : [url];
+        } else {
+          alternative =
+              await _requestPlayUrls(candidate.hash, qualityChain, cookie);
+        }
         if (alternative.isNotEmpty) {
           print('已切换到同名歌曲的可播放资源: ${candidate.hash}');
           return alternative;
@@ -1032,6 +1041,19 @@ class MusicApiService {
     // 兜底：主路径失败时，独立获取播放地址（不因歌词接口失败而阻塞播放）。
     final fallbackUrls = await getPlayUrls(hash, quality: quality);
     if (fallbackUrls.isEmpty) {
+      // 酷狗链路彻底失败（未登录/版权/风控）：
+      // 按「歌名+歌手」走 Meting（网易云源）匿名兜底播放。
+      if (songName.trim().isNotEmpty) {
+        final meting = await MetingApiService.findFallbackPlayUrl(
+          songName: songName,
+          artist: artist,
+        );
+        if (meting != null) {
+          final metingLyrics =
+              await MetingApiService.getLyrics(meting.song.id) ?? '';
+          return (urls: [meting.url], lyrics: metingLyrics);
+        }
+      }
       return (urls: <String>[], lyrics: '');
     }
     // 歌词尽力而为：失败不影响播放。
