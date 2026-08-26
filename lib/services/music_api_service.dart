@@ -1979,7 +1979,17 @@ class MusicApiService {
       return {'status': 0, 'message': '二维码状态响应格式错误'};
     } catch (e) {
       _qrLog('二维码状态请求异常: $e');
-      return {'status': 0, 'message': e.toString()};
+      // 429/瞬时网络错误不能当作二维码过期（status 0 会终止 UI 轮询），
+      // 返回 -1 让轮询继续、仅提示稍候重试。
+      final isTransient = e is DioException &&
+          (e.response?.statusCode == 429 ||
+              e.type == DioExceptionType.connectionTimeout ||
+              e.type == DioExceptionType.receiveTimeout ||
+              e.type == DioExceptionType.connectionError);
+      if (isTransient) {
+        return {'status': -1, 'message': '查询频繁，稍候自动重试…'};
+      }
+      return {'status': -1, 'message': '网络异常，稍候自动重试…'};
     }
   }
 
