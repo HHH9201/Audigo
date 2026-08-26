@@ -13,7 +13,6 @@ import '../models/play_history.dart';
 import '../models/song.dart';
 import '../models/user_playlist.dart';
 import 'media_cache_service.dart';
-import 'meting_api_service.dart';
 
 class SearchPage<T> {
   final List<T> items;
@@ -55,10 +54,6 @@ class MusicApiService {
     'AUDIGO_API',
     defaultValue: 'https://localhost:40000',
   );
-
-  /// Meting 源歌曲的 hash 前缀（后接网易云歌曲 id）。
-  /// 播放/歌词/下载链路据此分流到 Meting（未登录匿名链路）。
-  static const String metingHashPrefix = 'meting:';
 
   // 云网关鉴权 token（与原版 Go config.go 的 apiToken 一致）
   static const String apiToken =
@@ -517,58 +512,12 @@ class MusicApiService {
 
   static Future<SearchPage<Song>> searchSongPage(String keyword,
       {int page = 1, int pageSize = 30}) async {
-    // 未登录：酷狗上游对匿名请求风控严格（搜索/播放常被拦），
-    // 默认走 Meting（网易云源）匿名搜索，原唱优先排序。
-    if (!(await isLoggedIn())) {
-      final metingResult = await _searchSongsByMeting(keyword,
-          page: page, pageSize: pageSize);
-      if (metingResult.items.isNotEmpty) return metingResult;
-    }
     // 主路径：/search?type=song（酷狗 v1，Go 版验证可用的路径，解析 data.lists 的大写字段）
     final songResult =
         await _searchSongsByTypeSong(keyword, page: page, pageSize: pageSize);
     if (songResult.items.isNotEmpty) return songResult;
-    // 已登录但酷狗仍失败（风控/网关故障）时，降级 Meting 保证可用。
-    final metingFallback = await _searchSongsByMeting(keyword,
-        page: page, pageSize: pageSize);
-    if (metingFallback.items.isNotEmpty) return metingFallback;
     // 兜底：/search/complex
     return _searchSongsByComplex(keyword, page: page, pageSize: pageSize);
-  }
-
-  /// Meting 搜索结果缓存（关键词 -> 全量 Song），用于客户端分页。
-  /// Meting 一次返回约 30 条且无分页参数，翻页靠本地切片。
-  static final Map<String, List<Song>> _metingSearchCache = {};
-
-  /// Meting 匿名搜索（未登录主路径 / 酷狗失败兜底），原唱优先。
-  static Future<SearchPage<Song>> _searchSongsByMeting(String keyword,
-      {int page = 1, int pageSize = 30}) async {
-    if (keyword.trim().isEmpty) return const SearchPage(items: [], total: 0);
-    try {
-      var all = _metingSearchCache[keyword];
-      if (all == null) {
-        final results = await MetingApiService.searchRanked(keyword);
-        if (results.isEmpty) return const SearchPage(items: [], total: 0);
-        all = results
-            .map((m) => Song(
-                  hash: '$metingHashPrefix${m.id}',
-                  songName: m.name,
-                  authorName: m.artist,
-                  albumName: m.album,
-                  albumId: '',
-                  coverUrl: m.pic.isEmpty ? null : m.pic,
-                ))
-            .toList();
-        _metingSearchCache[keyword] = all;
-      }
-      final start = (page - 1) * pageSize;
-      if (start >= all.length) {
-        return const SearchPage(items: [], total: 0);
-      }
-      final items = all.skip(start).take(pageSize).toList();
-      return SearchPage(items: items, total: all.length);
-    } catch (_) {}
-    return const SearchPage(items: [], total: 0);
   }
 
   /// 酷狗 v1 /search?type=song：返回 data.lists，字段为大写（FileHash/OriSongName/...）。
@@ -908,12 +857,6 @@ class MusicApiService {
     String quality = '128k',
   }) async {
     if (hash.trim().isEmpty) return [];
-    // Meting 源（未登录匿名搜索的结果）：直取网易云直链，不走酷狗。
-    if (hash.startsWith(metingHashPrefix)) {
-      final url = await MetingApiService
-          .getPlayUrl(hash.substring(metingHashPrefix.length));
-      return url == null ? const <String>[] : [url];
-    }
     final normalizedQuality = _normalizeAudioQuality(quality);
     final qualityChain = normalizedQuality == 'flac'
         ? const ['flac', '320', '128']
@@ -936,17 +879,8 @@ class MusicApiService {
                 .contains(artist.trim().toLowerCase())) {
           continue;
         }
-        // 未登录时 searchSongs 返回的是 Meting 源候选（meting: 前缀），
-        // 需走 Meting 拿直链，不能拿去请求酷狗接口。
-        List<String> alternative;
-        if (candidate.hash.startsWith(metingHashPrefix)) {
-          final url = await MetingApiService.getPlayUrl(
-              candidate.hash.substring(metingHashPrefix.length));
-          alternative = url == null ? const <String>[] : [url];
-        } else {
-          alternative =
-              await _requestPlayUrls(candidate.hash, qualityChain, cookie);
-        }
+        final alternative =
+            await _requestPlayUrls(candidate.hash, qualityChain, cookie);
         if (alternative.isNotEmpty) {
           print('已切换到同名歌曲的可播放资源: ${candidate.hash}');
           return alternative;
@@ -995,14 +929,6 @@ class MusicApiService {
     if (hash.trim().isEmpty) {
       return (urls: <String>[], lyrics: '');
     }
-    // Meting 源：直链 + 网易云 LRC 一次取齐。
-    if (hash.startsWith(metingHashPrefix)) {
-      final id = hash.substring(metingHashPrefix.length);
-      final url = await MetingApiService.getPlayUrl(id);
-      if (url == null) return (urls: <String>[], lyrics: '');
-      final lyrics = await MetingApiService.getLyrics(id) ?? '';
-      return (urls: [url], lyrics: lyrics);
-    }
     final normalizedQuality = _normalizeAudioQuality(quality);
     final qualityChain = normalizedQuality == 'flac'
         ? const ['flac', '320', '128']
@@ -1041,19 +967,6 @@ class MusicApiService {
     // 兜底：主路径失败时，独立获取播放地址（不因歌词接口失败而阻塞播放）。
     final fallbackUrls = await getPlayUrls(hash, quality: quality);
     if (fallbackUrls.isEmpty) {
-      // 酷狗链路彻底失败（未登录/版权/风控）：
-      // 按「歌名+歌手」走 Meting（网易云源）匿名兜底播放。
-      if (songName.trim().isNotEmpty) {
-        final meting = await MetingApiService.findFallbackPlayUrl(
-          songName: songName,
-          artist: artist,
-        );
-        if (meting != null) {
-          final metingLyrics =
-              await MetingApiService.getLyrics(meting.song.id) ?? '';
-          return (urls: [meting.url], lyrics: metingLyrics);
-        }
-      }
       return (urls: <String>[], lyrics: '');
     }
     // 歌词尽力而为：失败不影响播放。
@@ -1551,10 +1464,7 @@ class MusicApiService {
     final playUrl = await getPlayUrl(song.hash, quality: effectiveQuality);
     if (playUrl == null || playUrl.isEmpty) return null;
 
-    // Meting 源（网易云直链）固定 mp3，不随音质设置变化。
-    final extension = song.hash.startsWith(metingHashPrefix)
-        ? '.mp3'
-        : (effectiveQuality == 'flac' ? '.flac' : '.mp3');
+    final extension = effectiveQuality == 'flac' ? '.flac' : '.mp3';
     final filename = _safeFilename(
       '${song.songName} - ${song.authorName}$extension',
     );
@@ -1683,12 +1593,6 @@ class MusicApiService {
   static Future<String> _loadRawLyrics(String hash,
       {String songName = '', String artist = ''}) async {
     var content = '';
-    // Meting 源：直接取网易云 LRC。
-    if (hash.startsWith(metingHashPrefix)) {
-      return await MetingApiService
-              .getLyrics(hash.substring(metingHashPrefix.length)) ??
-          '';
-    }
     final cookie = await _getCookie();
     try {
       final search = await _dio.get('$baseApi/search/lyric', queryParameters: {
@@ -1734,39 +1638,9 @@ class MusicApiService {
       // 兜底1：部分部署下 /search/lyric 返回空但 /lyric 支持按 hash 直取。
       content = await _loadLyricsByHashDirect(hash, cookie);
     }
-    if (content.isEmpty) {
-      // 兜底2：云端歌词接口不可用（空响应/502）时，改用自建 Meting 聚合源。
-      content = await _loadLyricsFromMeting(hash, songName, artist);
-    }
     return content;
   }
 
-  /// 歌词最终兜底：先按 hash 走 Meting kugou 源直取，
-  /// 失败且已知歌名时再按「歌名+歌手」走 netease 源搜索。
-  static Future<String> _loadLyricsFromMeting(
-      String hash, String songName, String artist) async {
-    try {
-      final kugou = await MetingApiService.getKugouLyricsByHash(hash);
-      if (kugou != null && kugou.isNotEmpty) {
-        print('✅ Meting kugou 歌词兜底成功: hash=$hash');
-        return kugou;
-      }
-    } catch (e) {
-      print('Meting kugou 歌词兜底失败: $e');
-    }
-    if (songName.trim().isEmpty) return '';
-    try {
-      final netease =
-          await MetingApiService.getLyricsBySearch(songName, artist);
-      if (netease != null && netease.isNotEmpty) {
-        print('✅ Meting netease 歌词兜底成功: $songName - $artist');
-        return netease;
-      }
-    } catch (e) {
-      print('Meting netease 歌词兜底失败: $e');
-    }
-    return '';
-  }
 
   /// 兜底：直接按 hash 请求歌词（部分 KuGouMusicApi 部署支持 /lyric?hash=）。
   static Future<String> _loadLyricsByHashDirect(
