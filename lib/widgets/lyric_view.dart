@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -162,32 +162,40 @@ class _LyricViewState extends State<LyricView>
             onTap: _showControlLayer,
             child: Stack(
             children: [
+              // 背景封面：对图片本身做模糊（ImageFiltered 结果可被引擎缓存），
+              // 替代全屏 BackdropFilter，避免歌词滚动时每帧全屏高斯模糊。
               Positioned.fill(
-                child: song?.coverBytes != null
-                    ? Image.memory(song!.coverBytes!, fit: BoxFit.cover)
-                    : song?.coverUrl != null && song!.coverUrl!.isNotEmpty
-                        ? (song.localPath?.isNotEmpty == true
-                            ? Image.file(
-                                File(song.coverUrl!),
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
-                                  color: const Color(0xFF0F172A),
-                                ),
-                              )
-                            : CachedNetworkImage(
-                                imageUrl: song.coverUrl!,
-                                fit: BoxFit.cover,
-                                errorWidget: (_, __, ___) => Container(
-                                  color: const Color(0xFF0F172A),
-                                ),
-                              ))
-                        : Container(color: const Color(0xFF0F172A)),
+                child: RepaintBoundary(
+                  child: ImageFiltered(
+                    imageFilter: ImageFilter.blur(
+                      sigmaX: 60,
+                      sigmaY: 60,
+                      tileMode: TileMode.decal,
+                    ),
+                    child: song?.coverBytes != null
+                        ? Image.memory(song!.coverBytes!, fit: BoxFit.cover)
+                        : song?.coverUrl != null && song!.coverUrl!.isNotEmpty
+                            ? (song.localPath?.isNotEmpty == true
+                                ? Image.file(
+                                    File(song.coverUrl!),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: const Color(0xFF0F172A),
+                                    ),
+                                  )
+                                : CachedNetworkImage(
+                                    imageUrl: song.coverUrl!,
+                                    fit: BoxFit.cover,
+                                    errorWidget: (_, __, ___) => Container(
+                                      color: const Color(0xFF0F172A),
+                                    ),
+                                  ))
+                            : Container(color: const Color(0xFF0F172A)),
+                  ),
+                ),
               ),
               Positioned.fill(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-                  child: Container(color: Colors.black.withOpacity(0.68)),
-                ),
+                child: Container(color: Colors.black.withOpacity(0.68)),
               ),
               Positioned.fill(
                 child: LayoutBuilder(
@@ -467,32 +475,37 @@ class _LyricViewState extends State<LyricView>
                         ]
                       : null,
                 ),
+                // 当前行逐字高亮由 progressNotifier（250ms）驱动局部刷新，
+                // 避免依赖整列表重建，字色动画也更平滑。
                 child: active && line.words.isNotEmpty
-                    ? Text.rich(
-                        TextSpan(
-                          children:
-                              List.generate(line.words.length, (wordIndex) {
-                            final sung =
-                                wordIndex < player.currentLyricWordIndex;
-                            final current =
-                                wordIndex == player.currentLyricWordIndex;
-                            return TextSpan(
-                              text: line.words[wordIndex].text,
-                              style: TextStyle(
-                                color: sung
-                                    ? AppTheme.accentOrange
-                                    : current
-                                        ? Color.lerp(
-                                            Colors.white,
-                                            AppTheme.accentOrange,
-                                            player.currentLyricWordProgress,
-                                          )
-                                        : Colors.white.withOpacity(0.62),
-                              ),
-                            );
-                          }),
+                    ? AnimatedBuilder(
+                        animation: player.progressNotifier,
+                        builder: (_, __) => Text.rich(
+                          TextSpan(
+                            children:
+                                List.generate(line.words.length, (wordIndex) {
+                              final sung =
+                                  wordIndex < player.currentLyricWordIndex;
+                              final current =
+                                  wordIndex == player.currentLyricWordIndex;
+                              return TextSpan(
+                                text: line.words[wordIndex].text,
+                                style: TextStyle(
+                                  color: sung
+                                      ? AppTheme.accentOrange
+                                      : current
+                                          ? Color.lerp(
+                                              Colors.white,
+                                              AppTheme.accentOrange,
+                                              player.currentLyricWordProgress,
+                                            )
+                                          : Colors.white.withOpacity(0.62),
+                                ),
+                              );
+                            }),
+                          ),
+                          textAlign: TextAlign.center,
                         ),
-                        textAlign: TextAlign.center,
                       )
                     : Text(line.text, textAlign: TextAlign.center),
               ),

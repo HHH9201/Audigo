@@ -1,4 +1,4 @@
-import 'package:cached_network_image/cached_network_image.dart';
+﻿import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -152,7 +152,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                           child: _safeCoverUrl != null
                               ? CachedNetworkImage(
                                   imageUrl: _safeCoverUrl!,
-                                  width: 140,
+                                  width: 140, memCacheWidth: 280,
                                   height: 140,
                                   fit: BoxFit.cover,
                                   errorWidget: (_, __, ___) => Container(
@@ -450,7 +450,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                                 child: song.coverUrl?.isNotEmpty == true
                                     ? CachedNetworkImage(
                                         imageUrl: song.coverUrl!,
-                                        width: 40,
+                                        width: 40, memCacheWidth: 80,
                                         height: 40,
                                         fit: BoxFit.cover,
                                         errorWidget: (_, __, ___) => Container(

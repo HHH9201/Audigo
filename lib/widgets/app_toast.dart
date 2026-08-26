@@ -9,15 +9,27 @@ import 'package:flutter/material.dart';
 class AppToast {
   static OverlayEntry? _entry;
   static Timer? _timer;
+  static GlobalKey<NavigatorState>? _navigatorKey;
 
-  /// 显示气泡提示（自动隐藏上一条）。
+  /// 注册全局 Navigator key，供无 BuildContext 的服务层调用
+  /// `AppToast.show(null, ...)` 弹出气泡。
+  static void attachNavigator(GlobalKey<NavigatorState> key) {
+    _navigatorKey = key;
+  }
+
+  /// 显示气泡提示（自动隐藏上一条）。[context] 为空时使用已注册的
+  /// 全局 Navigator 的 Overlay。
   static void show(
-    BuildContext context,
+    BuildContext? context,
     String message, {
     bool isError = false,
   }) {
     hide();
-    final overlay = Overlay.of(context, rootOverlay: true);
+    final overlay = (context != null
+            ? Overlay.maybeOf(context, rootOverlay: true)
+            : null) ??
+        _navigatorKey?.currentState?.overlay;
+    if (overlay == null) return;
     _entry = OverlayEntry(
       builder: (_) => _ToastBubble(message: message, isError: isError),
     );
@@ -81,8 +93,8 @@ class _ToastBubbleState extends State<_ToastBubble>
         ? const Color(0xFFFF8A80)
         : const Color(0xFF69F0AE);
     return Positioned(
-      // 右上角提示
-      top: MediaQuery.of(context).padding.top + 16,
+      // 右上角提示（避开自定义标题栏，向下偏移）
+      top: MediaQuery.of(context).padding.top + 56,
       right: 16,
       child: IgnorePointer(
         child: FadeTransition(

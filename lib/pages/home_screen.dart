@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/music_api_service.dart';
@@ -357,7 +357,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             currentFm.coverUrl!.isNotEmpty
                         ? CachedNetworkImage(
                             imageUrl: currentFm.coverUrl!,
-                            width: 80,
+                            width: 80, memCacheWidth: 160,
                             height: 80,
                             fit: BoxFit.cover,
                             errorWidget: (_, __, ___) =>
@@ -511,7 +511,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             currentAi.coverUrl!.isNotEmpty
                         ? CachedNetworkImage(
                             imageUrl: currentAi.coverUrl!,
-                            width: 80,
+                            width: 80, memCacheWidth: 160,
                             height: 80,
                             fit: BoxFit.cover,
                             errorWidget: (_, __, ___) =>
@@ -754,7 +754,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           song.coverUrl!.isNotEmpty
                                       ? CachedNetworkImage(
                                           imageUrl: song.coverUrl!,
-                                          width: 36,
+                                          width: 36, memCacheWidth: 72,
                                           height: 36,
                                           fit: BoxFit.cover,
                                           errorWidget: (_, __, ___) =>
@@ -893,7 +893,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: song.coverUrl != null && song.coverUrl!.isNotEmpty
                           ? CachedNetworkImage(
                               imageUrl: song.coverUrl!,
-                              width: 48,
+                              width: 48, memCacheWidth: 96,
                               height: 48,
                               fit: BoxFit.cover,
                               errorWidget: (_, __, ___) =>

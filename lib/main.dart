@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
@@ -17,6 +17,7 @@ import 'services/mpris_service.dart';
 import 'services/music_audio_handler.dart';
 import 'pages/main_scaffold.dart';
 import 'theme/theme_controller.dart';
+import 'widgets/app_toast.dart';
 import 'widgets/desktop_lyrics_window.dart';
 
 /// 是否桌面端。窗口管理、托盘、多窗口歌词等仅桌面功能在此为 true。
@@ -60,6 +61,9 @@ Future<void> main(List<String> args) async {
 
   final themeController = await ThemeController.load();
   final audioPlayerManager = AudioPlayerManager();
+
+  // 注册全局 Navigator，供服务层（如播放失败提示）弹出气泡。
+  AppToast.attachNavigator(DesktopLifecycleManager.instance.navigatorKey);
 
   WidgetsBinding.instance.addPostFrameCallback((_) {
     unawaited(_initializeDeferredServices(audioPlayerManager));

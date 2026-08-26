@@ -9,16 +9,33 @@ import 'package:screen_retriever/screen_retriever.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
-class DesktopLyricsWindow extends StatefulWidget {
+class DesktopLyricsWindow extends StatelessWidget {
   const DesktopLyricsWindow({super.key, required this.controller});
 
   final WindowController controller;
 
   @override
-  State<DesktopLyricsWindow> createState() => _DesktopLyricsWindowState();
+  Widget build(BuildContext context) {
+    // MaterialApp 放在无状态外壳中：歌词每 ~100ms 更新时只重建内容区，
+    // 避免整棵 MaterialApp（主题/本地化）反复重建。
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: DesktopLyricsWindowContent(controller: controller),
+    );
+  }
 }
 
-class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
+class DesktopLyricsWindowContent extends StatefulWidget {
+  const DesktopLyricsWindowContent({super.key, required this.controller});
+
+  final WindowController controller;
+
+  @override
+  State<DesktopLyricsWindowContent> createState() =>
+      _DesktopLyricsWindowState();
+}
+
+class _DesktopLyricsWindowState extends State<DesktopLyricsWindowContent> {
   _LyricsSnapshot _snapshot = const _LyricsSnapshot();
   double _fontSize = 23;
 
@@ -84,9 +101,7 @@ class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
         : _snapshot.song.isNotEmpty
             ? '${_snapshot.song}  ${_snapshot.artist}'
             : '拾音';
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
+    return Scaffold(
         backgroundColor: Colors.transparent,
         body: GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -136,7 +151,6 @@ class _DesktopLyricsWindowState extends State<DesktopLyricsWindow> {
             ),
           ),
         ),
-      ),
     );
   }
 }

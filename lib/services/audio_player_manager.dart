@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/song.dart';
 import '../services/media_cache_service.dart';
 import '../services/music_api_service.dart';
+import '../widgets/app_toast.dart';
 
 enum PlayMode { sequence, loop, random }
 
@@ -504,6 +505,10 @@ class AudioPlayerManager extends ChangeNotifier {
     if (requestId != _playRequestId) return;
     if (urls.isEmpty) {
       print('播放调试: 无法获取播放URL，播放中止');
+      // 未登录且本地也没有该音频时，前端提示未登录。
+      if (!await MusicApiService.isLoggedIn()) {
+        _showNotice('未登录：本地没有该歌曲，请登录后再播放在线歌曲');
+      }
       _processingState = ProcessingState.idle;
       notifyListeners();
       return;
@@ -623,6 +628,11 @@ class AudioPlayerManager extends ChangeNotifier {
 
     _processingState = ProcessingState.idle;
     notifyListeners();
+  }
+
+  // 无 BuildContext 时通过全局 Navigator 弹出气泡提示。
+  void _showNotice(String message, {bool isError = false}) {
+    AppToast.show(null, message, isError: isError);
   }
 
   void _clearGaplessState() {

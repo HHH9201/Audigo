@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/song.dart';
@@ -284,7 +284,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                   child: (song.coverUrl != null && song.coverUrl!.isNotEmpty)
                       ? CachedNetworkImage(
                           imageUrl: song.coverUrl!,
-                          width: 48,
+                          width: 48, memCacheWidth: 96,
                           height: 48,
                           fit: BoxFit.cover,
                           errorWidget: (_, __, ___) => Container(
@@ -386,6 +386,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                       imageUrl: album['cover'],
                       fit: BoxFit.cover,
                       width: double.infinity,
+                      memCacheWidth: 400,
                       errorWidget: (_, __, ___) => Container(
                         color: AppTheme.surfaceWarm,
                         child: Icon(Icons.album,

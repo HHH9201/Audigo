@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/song.dart';
@@ -160,7 +160,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                                   widget.destination.coverUrl!.isNotEmpty)
                               ? CachedNetworkImage(
                                   imageUrl: widget.destination.coverUrl!,
-                                  width: 140,
+                                  width: 140, memCacheWidth: 280,
                                   height: 140,
                                   fit: BoxFit.cover,
                                   errorWidget: (_, __, ___) => Container(
@@ -452,7 +452,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                                 child: song.coverUrl?.isNotEmpty == true
                                     ? CachedNetworkImage(
                                         imageUrl: song.coverUrl!,
-                                        width: 40,
+                                        width: 40, memCacheWidth: 80,
                                         height: 40,
                                         fit: BoxFit.cover,
                                         errorWidget: (_, __, ___) => Container(

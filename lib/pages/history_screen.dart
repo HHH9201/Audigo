@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/play_history.dart';
@@ -163,7 +163,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     child: (song.coverUrl != null && song.coverUrl!.isNotEmpty)
                         ? CachedNetworkImage(
                             imageUrl: song.coverUrl!,
-                            width: 44,
+                            width: 44, memCacheWidth: 88,
                             height: 44,
                             fit: BoxFit.cover,
                             errorWidget: (_, __, ___) => Container(

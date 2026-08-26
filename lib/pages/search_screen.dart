@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -709,6 +709,7 @@ class _SearchScreenState extends State<SearchScreen>
       width: width,
       height: height,
       fit: BoxFit.cover,
+      memCacheWidth: width != null ? (width * 2).round() : null,
       errorWidget: (_, __, ___) => fallback,
     );
   }

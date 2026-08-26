@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -1705,6 +1705,31 @@ class MusicApiService {
   }
 
   // 8. 登录/用户体系 API
+
+  /// 将登录相关异常转为用户可读文案（如服务端 502 网关故障时引导改用二维码登录）。
+  static String _friendlyLoginError(Object e) {
+    if (e is DioException) {
+      final status = e.response?.statusCode;
+      if (status != null && status >= 500) {
+        return '登录服务暂时不可用（$status），请稍后重试或改用二维码登录';
+      }
+      if (status == 401 || status == 403) {
+        return '请求被拒绝（$status），请稍后重试';
+      }
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          return '网络连接超时，请检查网络后重试';
+        case DioExceptionType.connectionError:
+          return '网络连接失败，请检查网络后重试';
+        default:
+          return '请求失败${status != null ? '（$status）' : ''}，请稍后重试';
+      }
+    }
+    return e.toString();
+  }
+
   static Future<Map<String, dynamic>> sendCaptcha(String mobile) async {
     try {
       final response = await _dio
@@ -1713,7 +1738,7 @@ class MusicApiService {
           ? response.data
           : {'status': 0, 'message': '发送失败'};
     } catch (e) {
-      return {'status': 0, 'message': e.toString()};
+      return {'status': 0, 'message': _friendlyLoginError(e)};
     }
   }
 
@@ -1746,7 +1771,7 @@ class MusicApiService {
       }
       return {'success': false, 'message': response.data?['message'] ?? '登录失败'};
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      return {'success': false, 'message': _friendlyLoginError(e)};
     }
   }
 
@@ -1927,6 +1952,15 @@ class MusicApiService {
     await prefs.remove('user_token');
     await prefs.remove('user_id');
     invalidateCookieCache();
+  }
+
+  /// 本地是否已保存登录凭证（登录成功时会写入 user_token/user_cookie）。
+  static Future<bool> isLoggedIn() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = (prefs.getString('user_token') ?? '').trim();
+    if (token.isNotEmpty) return true;
+    final cookie = prefs.getString('user_cookie') ?? '';
+    return cookie.contains('token=');
   }
 
   static List<LyricLine> parseLyrics(String content) {

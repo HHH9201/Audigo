@@ -1,4 +1,4 @@
-import 'package:cached_network_image/cached_network_image.dart';
+﻿import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../models/user_playlist.dart';
 import '../services/music_api_service.dart';
@@ -175,6 +175,7 @@ class _AccountPlaylistsScreenState extends State<AccountPlaylistsScreen> {
                       imageUrl: playlist.coverUrl,
                       fit: BoxFit.cover,
                       width: double.infinity,
+                      memCacheWidth: 400,
                       errorWidget: (_, __, ___) => Container(
                         color: AppTheme.surfaceWarm,
                         child: Center(
