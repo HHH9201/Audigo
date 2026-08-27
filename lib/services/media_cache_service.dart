@@ -55,6 +55,56 @@ class MediaCacheService {
     );
   }
 
+  /// 探测本地已缓存的音频文件（不发起下载）：返回该 hash 下
+  /// 音质最高且校验通过的一份；无缓存返回 null。
+  /// [minQuality] 指定时只接受音质不低于它的缓存（低音质缓存
+  /// 会回退到在线路径获取高音质）；传 null 接受任意音质。
+  /// 供播放器实现"缓存命中直接播"的快路径，跳过取 URL/VIP 等网络请求。
+  Future<File?> peekCachedAudio(String hash, {String? minQuality}) async {
+    if (hash.isEmpty) return null;
+    if (!await _audioDirectory.exists()) return null;
+    final key = _fileKey(hash);
+    final pattern =
+        RegExp('^${RegExp.escape(key)}_(128k|320k|flac)\\.(mp3|flac)\$');
+    final requiredRank = minQuality == null ? 0 : _qualityRank[_normalizeQuality(minQuality)] ?? 0;
+    File? best;
+    var bestRank = 0;
+    for (final entity in _audioDirectory.listSync()) {
+      if (entity is! File) continue;
+      final name = p.basename(entity.path);
+      final match = pattern.firstMatch(name);
+      if (match == null) continue;
+      final rank = _qualityRank[match.group(1)] ?? 0;
+      if (rank <= bestRank) continue;
+      final metadata = File('${entity.path}.meta');
+      if (!await _isValidAudio(entity, metadata)) continue;
+      best = entity;
+      bestRank = rank;
+    }
+    if (best == null) return null;
+    if (bestRank < requiredRank) return null;
+    return best;
+  }
+
+  /// 删除某 hash 的全部音频缓存（含 .meta）。
+  /// 用于播放中发现文件损坏（解码失败/停滞）时失效缓存，下次播放重新下载。
+  Future<void> invalidateAudio(String hash) async {
+    if (hash.isEmpty) return;
+    if (!await _audioDirectory.exists()) return;
+    final key = _fileKey(hash);
+    final pattern = RegExp(
+        '^${RegExp.escape(key)}_(128k|320k|flac)\\.(mp3|flac)(\\.meta)?\$');
+    for (final entity in _audioDirectory.listSync()) {
+      if (entity is! File) continue;
+      if (!pattern.hasMatch(p.basename(entity.path))) continue;
+      try {
+        await entity.delete();
+      } on FileSystemException {
+        // 删除失败：文件可能被播放器占用，下次再试。
+      }
+    }
+  }
+
   Future<CachedLyrics> getLyrics({
     required String hash,
     required LyricsLoader loader,
@@ -91,12 +141,13 @@ class MediaCacheService {
 
   Future<File> _loadAudio(String hash, String quality, String url) async {
     await _audioDirectory.create(recursive: true);
-    final extension = quality == 'flac' ? '.flac' : '.mp3';
+    final normalized = _normalizeQuality(quality);
+    final extension = normalized == 'flac' ? '.flac' : '.mp3';
     final path =
-        p.join(_audioDirectory.path, '${_fileKey(hash)}_$quality$extension');
+        p.join(_audioDirectory.path, '${_fileKey(hash)}_$normalized$extension');
     final target = File(path);
     final metadata = File('$path.meta');
-    if (await _isValid(target, metadata)) return target;
+    if (await _isValidAudio(target, metadata)) return target;
 
     await _deleteIfExists(target);
     await _deleteIfExists(metadata);
@@ -110,6 +161,12 @@ class MediaCacheService {
         throw FileSystemException(
             '下载的内容不是有效的音频文件（可能是 HTML 错误页）', temporary.path);
       }
+      // 拦截音质不符的响应（如请求无损但无 VIP 被降级为 MP3），
+      // 避免把 MP3 内容存成 .flac 文件。
+      if (normalized == 'flac' && !await _isFlacFile(temporary)) {
+        throw FileSystemException(
+            '下载的内容不是无损格式（服务器降级）', temporary.path);
+      }
       await temporary.rename(target.path);
       await _writeMetadata(metadata, length);
       // 缓存写入成功后，就地清理同一首歌更低音质的重复缓存（只留最高音质）。
@@ -121,6 +178,24 @@ class MediaCacheService {
       await _deleteIfExists(metadata);
       rethrow;
     }
+  }
+
+  /// 读取本地歌词缓存内容（krc/lrc）；无缓存或校验失败返回空串。
+  /// 供云盘同步等外部模块读取已缓存的歌词。
+  Future<String> readCachedLyrics(String hash) async {
+    if (hash.isEmpty) return '';
+    final prefix = p.join(_lyricsDirectory.path, _fileKey(hash));
+    for (final format in const ['krc', 'lrc']) {
+      final file = File('$prefix.$format');
+      final metadata = File('${file.path}.meta');
+      if (!await _isValid(file, metadata)) continue;
+      try {
+        return await file.readAsString();
+      } on FileSystemException {
+        // 尝试下一个格式。
+      }
+    }
+    return '';
   }
 
   Future<CachedLyrics> _loadLyrics(String hash, LyricsLoader loader) async {
@@ -164,6 +239,42 @@ class MediaCacheService {
     }
   }
 
+  /// 音频缓存校验：元数据一致 + 文件头必须是有效音频格式，
+  /// 防止此前缓存的 HTML 错误页被当作音频。
+  /// 另外 .flac 文件必须是真实 FLAC 头，清理历史上被误存为
+  /// .flac 的降级 MP3（无 VIP 请求无损时服务器会返回 128K MP3）。
+  Future<bool> _isValidAudio(File file, File metadata) async {
+    if (!await _isValid(file, metadata)) return false;
+    if (!_isValidAudioHeader(file) ||
+        (file.path.toLowerCase().endsWith('.flac') &&
+            !await _isFlacFile(file))) {
+      await _deleteIfExists(file);
+      await _deleteIfExists(metadata);
+      return false;
+    }
+    return true;
+  }
+
+  /// 校验文件头是否为 FLAC（'fLaC' 魔数）。
+  Future<bool> _isFlacFile(File file) async {
+    try {
+      final raf = await file.open();
+      try {
+        final header = await raf.read(4);
+        return header.length == 4 &&
+            header[0] == 0x66 && // f
+            header[1] == 0x4C && // L
+            header[2] == 0x61 && // a
+            header[3] == 0x43; // C
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 缓存文件基础校验：存在、非空、长度与 .meta 记录一致。
   Future<bool> _isValid(File file, File metadata) async {
     try {
       if (!await file.exists() || !await metadata.exists()) return false;
@@ -171,12 +282,6 @@ class MediaCacheService {
       if (length <= 0) return false;
       final decoded = jsonDecode(await metadata.readAsString());
       if (decoded is! Map || decoded['length'] != length) return false;
-      // 校验文件头，防止之前缓存的 HTML 错误页被当作音频
-      if (!_isValidAudioHeader(file)) {
-        await _deleteIfExists(file);
-        await _deleteIfExists(metadata);
-        return false;
-      }
       return true;
     } on Object {
       await _deleteIfExists(file);
@@ -323,23 +428,27 @@ class MediaCacheService {
     if (!await _audioDirectory.exists()) return 0;
     final pattern = RegExp(
         '^${RegExp.escape(key)}_(128k|320k|flac)\\.(mp3|flac)\$');
-    final found = <File>[];
+    final found = <MapEntry<File, int>>[];
     var keepRank = 0;
+    var freed = 0;
     for (final e in _audioDirectory.listSync()) {
       if (e is! File) continue;
       final name = p.basename(e.path);
       if (name.endsWith('.meta')) continue;
       final m = pattern.firstMatch(name);
       if (m == null) continue;
-      found.add(e);
+      // 文件名与实际内容不符（历史上被误存成 .flac 的降级 MP3）
+      // 不参与排名，直接删除，避免它以"高音质"身份挤掉正确缓存。
+      if (name.toLowerCase().endsWith('.flac') && !await _isFlacFile(e)) {
+        freed += await _deleteWithMeta(e);
+        continue;
+      }
       final rank = _qualityRank[m.group(1)!] ?? 0;
       if (rank > keepRank) keepRank = rank;
+      found.add(MapEntry(e, rank));
     }
-    var freed = 0;
-    for (final f in found) {
-      final m = pattern.firstMatch(p.basename(f.path));
-      final rank = _qualityRank[m!.group(1)!] ?? 0;
-      if (rank < keepRank) freed += await _deleteWithMeta(f);
+    for (final entry in found) {
+      if (entry.value < keepRank) freed += await _deleteWithMeta(entry.key);
     }
     return freed;
   }

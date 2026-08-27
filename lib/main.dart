@@ -59,12 +59,17 @@ Future<void> main(List<String> args) async {
     unawaited(_initializeDeferredServices(audioPlayerManager));
   });
   runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider.value(value: audioPlayerManager),
-        ChangeNotifierProvider.value(value: themeController),
-      ],
-      child: const AudiGoApp(),
+    ExcludeSemantics(
+      // 禁用语义树：规避 Flutter 引擎 Windows 无障碍桥的 AXTree 竞态
+      // bug（accessibility_bridge.cc 刷错误日志）。桌面播放器无屏幕
+      // 阅读器刚需，关闭后引擎不再构建/同步语义树。
+      child: MultiProvider(
+        providers: [
+          ChangeNotifierProvider.value(value: audioPlayerManager),
+          ChangeNotifierProvider.value(value: themeController),
+        ],
+        child: const AudiGoApp(),
+      ),
     ),
   );
 }

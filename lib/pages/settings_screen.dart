@@ -9,6 +9,7 @@ import '../services/audio_player_manager.dart';
 import '../services/desktop_lifecycle_manager.dart';
 import '../services/desktop_lyrics_manager.dart';
 import '../services/media_cache_service.dart';
+import '../services/webdav_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/app_toast.dart';
@@ -22,9 +23,9 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   static const _settingDefaults = <String, Object>{
-    'audio_quality': '128k',
+    'audio_quality': 'flac',
     'close_action': 'ask',
-    'playback_volume': 0.5,
+    'playback_volume': 1.0,
     'auto_play_next': true,
     'gapless_playback': true,
     'wifi_only_high_quality': false,
@@ -37,14 +38,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'app_theme_mode': 0,
   };
 
-  String _selectedQuality = '128k';
+  String _selectedQuality = 'flac';
   String _closeAction = 'ask';
-  double _volume = 0.5;
+  double _volume = 1.0;
   bool _autoPlayNext = true;
   bool _gaplessPlayback = true;
   bool _wifiOnly = false;
   bool _cacheBeforePlay = true; // 先缓存整首再播放；关闭则直接流式播放
   bool _desktopLyrics = true;
+  bool _lyricsNoBackground = false;
+  bool _lyricsLocked = false;
+  bool _lyricsGradient = true;
   bool _downloadLyrics = true;
   String _downloadPath = '';
   int _lyricsFontSize = 22;
@@ -53,9 +57,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _deduping = false;
   bool _startMinimized = false;
 
-  // 数值输入控件（默认音量）
+  // 云盘同步（WebDAV）
+  bool _webdavEnabled = false;
+  bool _webdavAutoUpload = true;
+  bool _webdavTesting = false;
+  final TextEditingController _webdavUrlController = TextEditingController();
+  final TextEditingController _webdavUserController = TextEditingController();
+  final TextEditingController _webdavPassController = TextEditingController();
+  final TextEditingController _webdavDirController = TextEditingController();
+
+  // 数值输入控件（默认音量 / 歌词文字大小）
   final TextEditingController _volumeController = TextEditingController();
   final FocusNode _volumeFocus = FocusNode();
+  final TextEditingController _lyricsFontSizeController =
+      TextEditingController();
+  final FocusNode _lyricsFontSizeFocus = FocusNode();
 
   @override
   void initState() {
@@ -65,12 +81,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _volumeFocus.addListener(() {
       if (!_volumeFocus.hasFocus) _commitVolumeText();
     });
+    _lyricsFontSizeFocus.addListener(() {
+      if (!_lyricsFontSizeFocus.hasFocus) _commitLyricsFontSizeText();
+    });
   }
 
   @override
   void dispose() {
     _volumeController.dispose();
     _volumeFocus.dispose();
+    _lyricsFontSizeController.dispose();
+    _lyricsFontSizeFocus.dispose();
+    _webdavUrlController.dispose();
+    _webdavUserController.dispose();
+    _webdavPassController.dispose();
+    _webdavDirController.dispose();
     super.dispose();
   }
 
@@ -78,23 +103,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
-      _selectedQuality = prefs.getString('audio_quality') ?? '128k';
+      _selectedQuality = prefs.getString('audio_quality') ?? 'flac';
       _closeAction = prefs.getString('close_action') ?? 'ask';
-      _volume = prefs.getDouble('playback_volume') ?? 0.5;
+      _volume = prefs.getDouble('playback_volume') ?? 1.0;
       _autoPlayNext = prefs.getBool('auto_play_next') ?? true;
       _gaplessPlayback = prefs.getBool('gapless_playback') ?? true;
       _wifiOnly = prefs.getBool('wifi_only_high_quality') ?? false;
       _cacheBeforePlay = prefs.getBool('cache_before_play') ?? true;
       _desktopLyrics = prefs.getBool('desktop_lyrics') ?? true;
+      _lyricsNoBackground =
+          prefs.getBool('desktop_lyrics_no_background') ?? false;
+      _lyricsLocked = prefs.getBool('desktop_lyrics_locked') ?? false;
+      _lyricsGradient = prefs.getBool('desktop_lyrics_gradient') ?? true;
       _downloadLyrics = prefs.getBool('download_lyrics') ?? true;
       _downloadPath = prefs.getString('download_path') ?? '';
       _lyricsFontSize = prefs.getInt('lyrics_font_size') ?? 22;
       _saveHistory = prefs.getBool('save_history') ?? true;
       _analytics = prefs.getBool('analytics_enabled') ?? true;
       _startMinimized = prefs.getBool('start_minimized') ?? false;
+      _webdavEnabled = prefs.getBool('webdav_enabled') ?? false;
+      _webdavAutoUpload = prefs.getBool('webdav_auto_upload') ?? true;
     });
     // 同步数值输入框文本
     _volumeController.text = '${(_volume * 100).round()}';
+    _lyricsFontSizeController.text = '$_lyricsFontSize';
+    _webdavUrlController.text = prefs.getString('webdav_url') ?? '';
+    _webdavUserController.text = prefs.getString('webdav_user') ?? '';
+    _webdavPassController.text = prefs.getString('webdav_password') ?? '';
+    _webdavDirController.text = prefs.getString('webdav_dir') ?? '/';
+  }
+
+  /// 保存云盘配置并让 WebDavService 重读。
+  Future<void> _commitWebdavFields() async {
+    await _saveString('webdav_url', _webdavUrlController.text.trim());
+    await _saveString('webdav_user', _webdavUserController.text.trim());
+    await _saveString('webdav_password', _webdavPassController.text);
+    var dir = _webdavDirController.text.trim();
+    if (dir.isEmpty) dir = '/';
+    if (!dir.startsWith('/')) dir = '/$dir';
+    await _saveString('webdav_dir', dir);
+    await WebDavService.instance.reload();
+  }
+
+  Future<void> _testWebdavConnection() async {
+    if (_webdavTesting) return;
+    setState(() => _webdavTesting = true);
+    try {
+      // 先保存当前输入，确保测试的是最新配置。
+      await _commitWebdavFields();
+      await _saveBool('webdav_enabled', true);
+      if (mounted) setState(() => _webdavEnabled = true);
+      final error = await WebDavService.instance.testConnection();
+      if (!mounted) return;
+      _showMessage(error ?? '云盘连接成功');
+      if (error != null) {
+        // 测试失败时回退启用状态，避免半配置状态发起同步。
+        await _saveBool('webdav_enabled', false);
+        if (mounted) {
+          setState(() => _webdavEnabled = false);
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _webdavTesting = false);
+    }
   }
 
   Future<void> _saveString(String key, String value) async {
@@ -160,6 +231,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final percent = (parsed ?? (_volume * 100).round()).clamp(0, 100);
     _volumeController.text = '$percent';
     _saveVolume(percent / 100);
+  }
+
+  /// 将歌词文字大小输入框的文本提交为 12-48 的字号。
+  void _commitLyricsFontSizeText() {
+    final parsed = int.tryParse(_lyricsFontSizeController.text.trim());
+    final size = (parsed ?? _lyricsFontSize).clamp(12, 48);
+    _lyricsFontSizeController.text = '$size';
+    if (size == _lyricsFontSize) return;
+    setState(() => _lyricsFontSize = size);
+    _saveInt('lyrics_font_size', size)
+        .then((_) => DesktopLyricsManager.instance.reloadLyricsWindow());
   }
 
   Future<void> _setSaveHistory(bool value) async {
@@ -506,9 +588,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   
 
+  /// 云盘同步配置行：左侧标签 + 右侧输入框（失焦或回车提交）。
+  Widget _webdavFieldRow(
+    String label,
+    TextEditingController controller, {
+    bool obscure = false,
+    String? hint,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              obscureText: obscure,
+              style: const TextStyle(fontSize: 13),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: hint,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: AppTheme.borderWarm),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: AppTheme.accentOrange),
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: AppTheme.borderWarm),
+                ),
+              ),
+              onSubmitted: (_) => _commitWebdavFields(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _sectionPlain(String title, List<Widget> children,
       {String? description}) {
     return _section(title, children, description: description);
+  }
+
+  /// 关于页信息行：图标 + 标签 + 值，左右对齐。
+  Widget _aboutRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: AppTheme.textSecondary),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 页面顶部：简洁标题 + 说明。
@@ -661,6 +823,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _settingCell(
                         icon: Icons.palette_rounded,
                         title: '界面主题',
+                        horizontal: true,
                         control: DropdownButton<AppThemeMode>(
                           value: context.watch<ThemeController>().mode,
                           underline: const SizedBox.shrink(),
@@ -689,7 +852,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _settingCell(
                           icon: Icons.desktop_windows_rounded,
                           title: '桌面歌词',
-                          subtitle: '透明置顶的独立逐字歌词窗口',
                           horizontal: true,
                           control: Switch(
                             value: _desktopLyrics,
@@ -706,32 +868,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         _settingCell(
                           icon: Icons.format_size_rounded,
-                          title: '歌词文字大小',
-                          subtitle: '12 - 48',
+                          title: '歌词大小',
                           horizontal: true,
-                          control: SliderTheme(
-                            data: SliderThemeData(
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(
-                                  enabledThumbRadius: 5),
-                              activeTrackColor: AppTheme.accentOrange,
-                              inactiveTrackColor: AppTheme.borderWarm,
-                              thumbColor: AppTheme.accentOrange,
-                            ),
-                            child: Slider(
-                              value: _lyricsFontSize.toDouble(),
-                              min: 12,
-                              max: 48,
-                              divisions: 36,
-                              label: '$_lyricsFontSize',
-                              onChanged: (value) async {
-                                final size = value.round();
-                                setState(() => _lyricsFontSize = size);
-                                await _saveInt('lyrics_font_size', size);
-                                await DesktopLyricsManager.instance
-                                    .reloadLyricsWindow();
-                              },
-                            ),
+                          control: _inputField(
+                            _lyricsFontSizeController,
+                            _lyricsFontSizeFocus,
+                            _commitLyricsFontSizeText,
+                          ),
+                        ),
+                        _settingCell(
+                          icon: Icons.layers_clear_rounded,
+                          title: '隐藏歌词背景',
+                          horizontal: true,
+                          control: Switch(
+                            value: _lyricsNoBackground,
+                            onChanged: (value) async {
+                              setState(() => _lyricsNoBackground = value);
+                              final prefs =
+                                  await SharedPreferences.getInstance();
+                              await prefs.setBool(
+                                  'desktop_lyrics_no_background', value);
+                              // 重新应用样式（透明背景 + 文字描边）。
+                              await DesktopLyricsManager.instance
+                                  .reloadSettings();
+                            },
+                          ),
+                        ),
+                        _settingCell(
+                          icon: Icons.lock_rounded,
+                          title: '锁定歌词位置',
+                          horizontal: true,
+                          control: Switch(
+                            value: _lyricsLocked,
+                            onChanged: (value) async {
+                              setState(() => _lyricsLocked = value);
+                              await DesktopLyricsManager.instance
+                                  .setLocked(value);
+                            },
+                          ),
+                        ),
+                        _settingCell(
+                          icon: Icons.gradient_rounded,
+                          title: '逐字渐变填充',
+                          horizontal: true,
+                          control: Switch(
+                            value: _lyricsGradient,
+                            onChanged: (value) async {
+                              setState(() => _lyricsGradient = value);
+                              await DesktopLyricsManager.instance
+                                  .setGradient(value);
+                            },
                           ),
                         ),
                       ],
@@ -765,6 +951,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ], description: '下载时的歌词与存储位置'),
+                _section('云盘同步', [
+                  _settingTile(
+                    icon: Icons.cloud_outlined,
+                    title: '启用云盘同步',
+                    subtitle: '播放的歌曲与歌词自动备份到云盘，接口失败时从云盘兜底播放',
+                    control: Switch(
+                      value: _webdavEnabled,
+                      onChanged: (value) async {
+                        if (value && (_webdavUrlController.text.trim().isEmpty ||
+                            _webdavUserController.text.trim().isEmpty ||
+                            _webdavPassController.text.isEmpty)) {
+                          _showMessage('请先填写服务器地址、账号与应用密码');
+                          return;
+                        }
+                        await _commitWebdavFields();
+                        await _saveBool('webdav_enabled', value);
+                        if (mounted) setState(() => _webdavEnabled = value);
+                      },
+                    ),
+                  ),
+                  _webdavFieldRow('服务器地址', _webdavUrlController,
+                      hint: 'https://webdav.123pan.cn/webdav'),
+                  _webdavFieldRow('账号', _webdavUserController,
+                      hint: '手机号或邮箱'),
+                  _webdavFieldRow('应用密码', _webdavPassController,
+                      obscure: true, hint: '云盘后台生成的应用密码'),
+                  _webdavFieldRow('远端目录', _webdavDirController,
+                      hint: '/ （即云盘授权目录）'),
+                  _settingTile(
+                    icon: Icons.cloud_upload_outlined,
+                    title: '自动上传',
+                    subtitle: '播放成功后自动把歌曲与歌词备份到云盘（已存在则跳过）',
+                    control: Switch(
+                      value: _webdavAutoUpload,
+                      onChanged: (value) async {
+                        await _saveBool('webdav_auto_upload', value);
+                        if (mounted) {
+                          setState(() => _webdavAutoUpload = value);
+                        }
+                      },
+                    ),
+                  ),
+                  _settingTile(
+                    icon: Icons.wifi_find_outlined,
+                    title: '测试连接',
+                    subtitle: '保存并验证当前云盘配置',
+                    control: OutlinedButton(
+                      onPressed:
+                          _webdavTesting ? null : _testWebdavConnection,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: _webdavTesting
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('测试连接'),
+                    ),
+                  ),
+                ], description: 'WebDAV 云盘（123 云盘等）：歌曲与歌词的备份与兜底播放'),
                 _section('应用行为', [
                   _settingTile(
                     icon: Icons.power_settings_new_rounded,
@@ -819,28 +1068,81 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ], description: '本地数据记录开关'),
                 _sectionPlain('关于拾音', [
-                  Text(
-                    '拾音 AudiGo - 让声音随行',
-                    style:
-                        TextStyle(fontSize: 13, color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '版本: 1.0.0',
-                    style:
-                        TextStyle(fontSize: 13, color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '作者: HJH',
-                    style:
-                        TextStyle(fontSize: 13, color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'GitHub: https://github.com/HHH9201/AudiGo',
-                    style:
-                        TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceWarm,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        // 应用标识：图标 + 名称 + 标语
+                        Row(
+                          children: [
+                            Container(
+                              width: 52,
+                              height: 52,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    AppTheme.accentOrange,
+                                    AppTheme.accentOrange.withOpacity(0.7),
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppTheme.accentOrange
+                                        .withOpacity(0.3),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(
+                                Icons.graphic_eq_rounded,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '拾音 AudiGo',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    '让声音随行',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(height: 1),
+                        const SizedBox(height: 6),
+                        // 信息行：图标 + 标签 + 值
+                        _aboutRow(Icons.dns_rounded, '版本', '1.0.0'),
+                        _aboutRow(Icons.person_rounded, '作者', 'HJH'),
+                        _aboutRow(
+                            Icons.code_rounded, 'GitHub', 'HHH9201/AudiGo'),
+                      ],
+                    ),
                   ),
                 ], description: '应用版本与项目信息'),
               ],

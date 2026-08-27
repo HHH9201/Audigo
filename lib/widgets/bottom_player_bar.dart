@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -22,7 +23,138 @@ class BottomPlayerBar extends StatefulWidget {
 }
 
 class _BottomPlayerBarState extends State<BottomPlayerBar> {
-  bool _showVolumePopover = false;
+  final LayerLink _volumeLayerLink = LayerLink();
+  OverlayEntry? _volumeOverlayEntry;
+
+  @override
+  void dispose() {
+    _volumeOverlayEntry?.remove();
+    _volumeOverlayEntry = null;
+    super.dispose();
+  }
+
+  /// 音量弹层必须挂载到 Overlay 上：底栏高度固定为 80，
+  /// 若用 Stack + Positioned 把弹层画到底栏边界之外，超出部分无法命中手势，
+  /// 导致滑块既点不中也拖不动。
+  void _toggleVolumePopover() {
+    if (_volumeOverlayEntry != null) {
+      _closeVolumePopover();
+      return;
+    }
+    final player = context.read<AudioPlayerManager>();
+    _volumeOverlayEntry = OverlayEntry(
+      builder: (_) => _buildVolumePopover(player),
+    );
+    Overlay.of(context).insert(_volumeOverlayEntry!);
+    setState(() {});
+  }
+
+  void _closeVolumePopover() {
+    _volumeOverlayEntry?.remove();
+    _volumeOverlayEntry = null;
+    if (mounted) setState(() {});
+  }
+
+  /// 滚轮调节音量（悬停在音量图标或弹层上时）
+  void _onVolumeScroll(PointerScrollEvent event) {
+    final player = context.read<AudioPlayerManager>();
+    final step = event.scrollDelta.dy > 0 ? -0.05 : 0.05;
+    player.setVolume((player.volume + step).clamp(0.0, 1.0));
+  }
+
+  Widget _wrapVolumeScroll(Widget child) {
+    return Listener(
+      onPointerSignal: (event) {
+        if (event is PointerScrollEvent) _onVolumeScroll(event);
+      },
+      child: child,
+    );
+  }
+
+  Widget _buildVolumePopover(AudioPlayerManager player) {
+    return Stack(
+      children: [
+        // 全屏透明屏障：点击弹层外部关闭
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _closeVolumePopover,
+            child: const SizedBox.expand(),
+          ),
+        ),
+        CompositedTransformFollower(
+          link: _volumeLayerLink,
+          targetAnchor: Alignment.topCenter,
+          followerAnchor: Alignment.bottomCenter,
+          offset: const Offset(0, 4),
+          showWhenUnlinked: false,
+          child: _wrapVolumeScroll(
+            Material(
+              type: MaterialType.transparency,
+              child: ListenableBuilder(
+                listenable: player,
+                builder: (context, _) => Container(
+                  width: 44,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceWhite,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.borderWarm),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.12),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 逆时针旋转 90°：滑块 min 朝下、max 朝上；
+                      // 旋转会交换宽高，因此给滑块显式的双向尺寸。
+                      RotatedBox(
+                        quarterTurns: -1,
+                        child: SizedBox(
+                          width: 132,
+                          height: 28,
+                          child: SliderTheme(
+                            data: SliderThemeData(
+                              trackHeight: 3,
+                              thumbShape: const RoundSliderThumbShape(
+                                  enabledThumbRadius: 5),
+                              activeTrackColor: AppTheme.accentOrange,
+                              inactiveTrackColor: AppTheme.borderWarm,
+                              thumbColor: AppTheme.accentOrange,
+                            ),
+                            child: Slider(
+                              value: player.volume,
+                              min: 0.0,
+                              max: 1.0,
+                              onChanged: (v) => player.setVolume(v),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '${(player.volume * 100).toInt()}%',
+                        maxLines: 1,
+                        style: TextStyle(
+                            fontSize: 10,
+                            height: 1.0,
+                            color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   String _formatDuration(Duration duration) {
     final minutes = duration.inMinutes.remainder(60).toString().padLeft(1, '0');
@@ -278,16 +410,27 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
                       child: Material(
                         color: AppTheme.accentOrange,
                         shape: const CircleBorder(),
-                        child: IconButton(
-                          padding: EdgeInsets.zero,
-                          icon: Icon(
-                            player.isPlaying ? Icons.pause : Icons.play_arrow,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                          tooltip: player.isPlaying ? "暂停" : "播放",
-                          onPressed: player.togglePlay,
-                        ),
+                        child: player.isPreparingSong
+                            ? const Padding(
+                                padding: EdgeInsets.all(14),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white),
+                                ),
+                              )
+                            : IconButton(
+                                padding: EdgeInsets.zero,
+                                icon: Icon(
+                                  player.isPlaying
+                                      ? Icons.pause
+                                      : Icons.play_arrow,
+                                  color: Colors.white,
+                                  size: 28,
+                                ),
+                                tooltip: player.isPlaying ? "暂停" : "播放",
+                                onPressed: player.togglePlay,
+                              ),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -331,11 +474,10 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                // 音量控制
-                Stack(
-                  clipBehavior: Clip.none,
-                  alignment: Alignment.center,
-                  children: [
+                // 音量控制：弹层挂载到 Overlay，图标本身支持滚轮调音量
+                CompositedTransformTarget(
+                  link: _volumeLayerLink,
+                  child: _wrapVolumeScroll(
                     IconButton(
                       icon: Icon(
                         player.volume == 0
@@ -347,60 +489,9 @@ class _BottomPlayerBarState extends State<BottomPlayerBar> {
                         color: AppTheme.textSecondary,
                       ),
                       tooltip: "音量 (${(player.volume * 100).toInt()}%)",
-                      onPressed: () {
-                        setState(
-                            () => _showVolumePopover = !_showVolumePopover);
-                      },
+                      onPressed: _toggleVolumePopover,
                     ),
-                    if (_showVolumePopover)
-                      Positioned(
-                        bottom: 48,
-                        child: Container(
-                          width: 140,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.12),
-                                blurRadius: 12,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: SliderTheme(
-                                  data: SliderThemeData(
-                                    trackHeight: 3,
-                                    thumbShape: const RoundSliderThumbShape(
-                                        enabledThumbRadius: 5),
-                                    activeTrackColor: AppTheme.accentOrange,
-                                    inactiveTrackColor: AppTheme.borderWarm,
-                                    thumbColor: AppTheme.accentOrange,
-                                  ),
-                                  child: Slider(
-                                    value: player.volume,
-                                    min: 0.0,
-                                    max: 1.0,
-                                    onChanged: (v) => player.setVolume(v),
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                '${(player.volume * 100).toInt()}%',
-                                style: TextStyle(
-                                    fontSize: 10,
-                                    color: AppTheme.textSecondary),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
+                  ),
                 ),
 
                 // 歌词按钮（图标改为"词"字）

@@ -1,4 +1,5 @@
-﻿import 'dart:io';
+import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -60,12 +61,6 @@ class _MainScaffoldState extends State<MainScaffold> {
   int _lastSideLyricIndex = -1;
   double _sideLyricExtent = 44;
 
-  @override
-  void initState() {
-    super.initState();
-    _refreshUserStatus();
-  }
-
   Future<void> _refreshUserStatus() async {
     final userRes = await MusicApiService.getUserDetail();
     if (mounted) {
@@ -82,6 +77,153 @@ class _MainScaffoldState extends State<MainScaffold> {
   }
 
   final TextEditingController _searchController = TextEditingController();
+
+  // 标题栏搜索框的搜索建议下拉（与搜索页共用 getSearchSuggestions 接口）。
+  final LayerLink _searchLayerLink = LayerLink();
+  final FocusNode _searchFocusNode = FocusNode();
+  OverlayEntry? _searchSuggestionOverlay;
+  Timer? _titleSuggestionTimer;
+  List<SearchSuggestion> _titleSuggestions = [];
+  String _titleSuggestionsQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchFocusNode.addListener(_onTitleSearchFocusChanged);
+    _refreshUserStatus();
+  }
+
+  void _onTitleSearchFocusChanged() {
+    if (!_searchFocusNode.hasFocus) {
+      // 延迟隐藏：让建议项的点击事件先完成再收起下拉。
+      Timer(const Duration(milliseconds: 150), () {
+        if (!_searchFocusNode.hasFocus) _hideTitleSuggestions();
+      });
+    }
+  }
+
+  void _onTitleQueryChanged() {
+    _titleSuggestionTimer?.cancel();
+    final query = _searchController.text.trim();
+    if (query.isEmpty) {
+      _hideTitleSuggestions();
+      return;
+    }
+    // 与搜索页一致的 300ms 防抖联想。
+    _titleSuggestionTimer = Timer(const Duration(milliseconds: 300), () async {
+      final suggestions = await MusicApiService.getSearchSuggestions(query);
+      if (!mounted || _searchController.text.trim() != query) return;
+      if (!_searchFocusNode.hasFocus) return;
+      _titleSuggestions = suggestions.take(10).toList();
+      _titleSuggestionsQuery = query;
+      if (_titleSuggestions.isEmpty) {
+        _hideTitleSuggestions();
+      } else {
+        _showTitleSuggestions();
+      }
+    });
+  }
+
+  void _showTitleSuggestions() {
+    _hideTitleSuggestions();
+    final overlay = Overlay.of(context, rootOverlay: true);
+    _searchSuggestionOverlay = OverlayEntry(
+      builder: (context) => Positioned(
+        width: 320,
+        child: CompositedTransformFollower(
+          link: _searchLayerLink,
+          targetAnchor: Alignment.bottomLeft,
+          followerAnchor: Alignment.topLeft,
+          showWhenUnlinked: false,
+          child: Material(
+            elevation: 6,
+            borderRadius: BorderRadius.circular(8),
+            color: AppTheme.surfaceWhite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final suggestion in _titleSuggestions)
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.search,
+                        size: 18, color: AppTheme.textSecondary),
+                    title: Text.rich(
+                      _highlightTitleMatch(
+                          suggestion.keyword, _titleSuggestionsQuery),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: Text(
+                      switch (suggestion.type) {
+                        'album' => '专辑',
+                        'mv' => 'MV',
+                        _ => '歌曲',
+                      },
+                      style:
+                          TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                    ),
+                    onTap: () => _submitTitleSearch(suggestion.keyword),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(_searchSuggestionOverlay!);
+  }
+
+  void _hideTitleSuggestions() {
+    _searchSuggestionOverlay?.remove();
+    _searchSuggestionOverlay = null;
+  }
+
+  /// 关键词命中部分加粗（与搜索页高亮同款效果）。
+  TextSpan _highlightTitleMatch(String keyword, String query) {
+    if (query.isEmpty) {
+      return TextSpan(
+          text: keyword,
+          style: TextStyle(fontSize: 13, color: AppTheme.textPrimary));
+    }
+    final idx = keyword.toLowerCase().indexOf(query.toLowerCase());
+    if (idx < 0) {
+      return TextSpan(
+          text: keyword,
+          style: TextStyle(fontSize: 13, color: AppTheme.textPrimary));
+    }
+    return TextSpan(
+      style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+      children: [
+        TextSpan(text: keyword.substring(0, idx)),
+        TextSpan(
+          text: keyword.substring(idx, idx + query.length),
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        TextSpan(text: keyword.substring(idx + query.length)),
+      ],
+    );
+  }
+
+  /// 提交标题栏搜索：跳到搜索页并直接执行搜索（与搜索页行为一致）。
+  void _submitTitleSearch(String keyword) {
+    final query = keyword.trim();
+    if (query.isEmpty) return;
+    _titleSuggestionTimer?.cancel();
+    _hideTitleSuggestions();
+    _searchFocusNode.unfocus();
+    _searchController.value = TextEditingValue(
+      text: query,
+      selection: TextSelection.collapsed(offset: query.length),
+    );
+    if (_selectedIndex == 1 &&
+        _navigationState.detail == null &&
+        query == _searchQuery) {
+      setState(() => _pageVersions[1]++);
+    } else {
+      setState(() => _searchQuery = query);
+      _navigateTo(1);
+    }
+  }
 
   void _navigateTo(int index) {
     if (index == _selectedIndex && _navigationState.detail == null) return;
@@ -170,6 +312,10 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   @override
   void dispose() {
+    _searchFocusNode.removeListener(_onTitleSearchFocusChanged);
+    _searchFocusNode.dispose();
+    _titleSuggestionTimer?.cancel();
+    _hideTitleSuggestions();
     _searchController.dispose();
     _lyricSideController.dispose();
     super.dispose();
@@ -319,21 +465,13 @@ class _MainScaffoldState extends State<MainScaffold> {
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: const Color(0x15000000)),
                   ),
-                  child: TextField(
-                    controller: _searchController,
-                    onSubmitted: (val) {
-                      final query = val.trim();
-                      if (query.isNotEmpty) {
-                        if (_selectedIndex == 1 &&
-                            _navigationState.detail == null &&
-                            query == _searchQuery) {
-                          setState(() => _pageVersions[1]++);
-                        } else {
-                          setState(() => _searchQuery = query);
-                          _navigateTo(1);
-                        }
-                      }
-                    },
+                  child: CompositedTransformTarget(
+                    link: _searchLayerLink,
+                    child: TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      onChanged: (_) => _onTitleQueryChanged(),
+                      onSubmitted: _submitTitleSearch,
                     decoration: InputDecoration(
                       hintText: "搜索...",
                       hintStyle: TextStyle(
@@ -345,6 +483,7 @@ class _MainScaffoldState extends State<MainScaffold> {
                       contentPadding: const EdgeInsets.symmetric(vertical: 7),
                     ),
                     style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                    ),
                   ),
                 ),
               ),
@@ -576,7 +715,11 @@ class _MainScaffoldState extends State<MainScaffold> {
         border:
             const Border(left: BorderSide(color: Color(0x15000000), width: 1)),
       ),
-      child: Column(
+      // ListTile 的背景/水波纹绘制在最近的 Material 上；外层带背景色的
+      // Container 会遮挡它并触发 debug 断言。包一层透明 Material 恢复涟漪。
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
         children: [
           Container(
             height: 48,
@@ -638,6 +781,7 @@ class _MainScaffoldState extends State<MainScaffold> {
                 : _buildMiniLyricView(player),
           ),
         ],
+        ),
       ),
     );
   }

@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -59,7 +59,14 @@ class _SearchScreenState extends State<SearchScreen>
     _controller.addListener(_onQueryChanged);
     _loadSearchHistory();
     _loadHotSearch();
-    _applyInitialQuery();
+    // 带初始关键词进入时，搜索须延迟到首帧后执行：_doSearch 内的
+    // FocusScope.of(context) 等祖先查找在 initState 阶段会抛异常，
+    // 直接调用会把搜索流程中断（表现为跳转过来但没有任何搜索）。
+    if (widget.initialQuery.trim().isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _applyInitialQuery();
+      });
+    }
   }
 
   Future<void> _loadSearchHistory() async {
@@ -307,37 +314,43 @@ class _SearchScreenState extends State<SearchScreen>
         border: Border.all(color: AppTheme.borderWarm),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: ListView.builder(
-        shrinkWrap: true,
-        itemCount: _suggestions.length,
-        itemBuilder: (context, index) {
-          final suggestion = _suggestions[index];
-          final label = switch (suggestion.type) {
-            'album' => '专辑',
-            'mv' => 'MV',
-            _ => '歌曲',
-          };
-          return ListTile(
-            dense: true,
-            leading:
-                Icon(Icons.search, size: 18, color: AppTheme.textSecondary),
-            title: Text.rich(
-              _highlightMatch(suggestion.keyword, _controller.text.trim()),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            trailing: Text(label,
-                style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-            onTap: () {
-              _controller.value = TextEditingValue(
-                text: suggestion.keyword,
-                selection:
-                    TextSelection.collapsed(offset: suggestion.keyword.length),
-              );
-              _doSearch(suggestion.keyword);
-            },
-          );
-        },
+      // ListTile 的水波纹绘制在最近的 Material 上；外层带背景色的
+      // DecoratedBox 会遮挡它。包一层透明 Material 消除断言并恢复涟漪。
+      child: Material(
+        type: MaterialType.transparency,
+        child: ListView.builder(
+          shrinkWrap: true,
+          itemCount: _suggestions.length,
+          itemBuilder: (context, index) {
+            final suggestion = _suggestions[index];
+            final label = switch (suggestion.type) {
+              'album' => '专辑',
+              'mv' => 'MV',
+              _ => '歌曲',
+            };
+            return ListTile(
+              dense: true,
+              leading:
+                  Icon(Icons.search, size: 18, color: AppTheme.textSecondary),
+              title: Text.rich(
+                _highlightMatch(suggestion.keyword, _controller.text.trim()),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: Text(label,
+                  style:
+                      TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+              onTap: () {
+                _controller.value = TextEditingValue(
+                  text: suggestion.keyword,
+                  selection: TextSelection.collapsed(
+                      offset: suggestion.keyword.length),
+                );
+                _doSearch(suggestion.keyword);
+              },
+            );
+          },
+        ),
       ),
     );
   }

@@ -131,7 +131,7 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
     if (player == null) return;
     final song = player.currentSong;
     final state =
-        '${song?.hash}|${player.isPlaying}|${DesktopLyricsManager.instance.enabled}';
+        '${song?.hash}|${player.isPlaying}|${DesktopLyricsManager.instance.enabled}|${DesktopLyricsManager.instance.locked}';
     if (!force && state == _menuState) return;
     _menuState = state;
 
@@ -170,6 +170,14 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
             key: 'desktop_lyrics',
             label: DesktopLyricsManager.instance.enabled ? '隐藏桌面歌词' : '显示桌面歌词',
           ),
+          MenuItem(
+            key: 'desktop_lyrics_lock',
+            label: DesktopLyricsManager.instance.locked
+                ? '解锁桌面歌词（恢复拖动）'
+                : '锁定桌面歌词（防误拖）',
+          ),
+          MenuItem(key: 'lyrics_font_up', label: '歌词字号 +'),
+          MenuItem(key: 'lyrics_font_down', label: '歌词字号 −'),
           MenuItem(key: 'show', label: '显示 拾音'),
           MenuItem(key: 'exit', label: '退出'),
         ],
@@ -212,6 +220,14 @@ class DesktopLifecycleManager with WindowListener, TrayListener {
         DesktopLyricsManager.instance
             .toggle()
             .then((_) => _updateTrayMenu(force: true));
+      case 'desktop_lyrics_lock':
+        DesktopLyricsManager.instance
+            .setLocked(!DesktopLyricsManager.instance.locked)
+            .then((_) => _updateTrayMenu(force: true));
+      case 'lyrics_font_up':
+        DesktopLyricsManager.instance.adjustFontSize(2);
+      case 'lyrics_font_down':
+        DesktopLyricsManager.instance.adjustFontSize(-2);
       case 'show':
         showWindow();
       case 'exit':

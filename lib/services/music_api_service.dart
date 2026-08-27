@@ -62,6 +62,17 @@ class MusicApiService {
   static final Dio _dio = _createDio();
   static DateTime? _lastVipClaim;
   static Future<void>? _vipClaimRequest;
+  static Future<SharedPreferences>? _prefsFuture;
+  static DateTime? _vipActiveUntil;
+
+  /// 概念版 VIP 有效期持久化 key（epoch 毫秒）。
+  /// 领取/查询成功后写入，重启后有效期内直接跳过领取，
+  /// 避免每次启动都打 8 次领取接口触发风控。
+  static const String _vipUntilPrefKey = 'youth_vip_active_until_ms';
+
+  static Future<SharedPreferences> _getPrefs() {
+    return _prefsFuture ??= SharedPreferences.getInstance();
+  }
 
   /// 是否为发往云网关（baseApi）的请求。
   static bool _isGatewayRequest(String url) =>
@@ -670,6 +681,40 @@ class MusicApiService {
     return const SearchPage(items: [], total: 0);
   }
 
+  /// 获取 MV 播放地址（KuGouMusicApi /mv/url，hash 来自搜索结果的 MvHash）。
+  /// 返回可直连的 mp4 地址；失败/无版权时返回 null。
+  static Future<String?> getMvUrl(String mvHash) async {
+    if (mvHash.trim().isEmpty) return null;
+    try {
+      final cookie = await _getCookie();
+      final response = await _dio.get(
+        '$baseApi/mv/url',
+        queryParameters: {
+          'hash': mvHash,
+          'cookie': cookie,
+        },
+      );
+      final data = response.data?['data'];
+      // 常见结构：{data: [{url: ..., quality: ...}, ...]} 或直接 url 字段。
+      String? url;
+      if (data is List) {
+        for (final entry in data) {
+          if (entry is Map && entry['url'] is String) {
+            url = entry['url'] as String;
+            break;
+          }
+        }
+      } else if (data is Map) {
+        url = data['url']?.toString();
+      }
+      if (url != null && url.startsWith('http')) return url;
+      print('MV 地址响应无可用 url: ${response.data}');
+    } catch (e) {
+      print('获取 MV 播放地址失败: $e');
+    }
+    return null;
+  }
+
   static Future<List<HotSearchCategory>> getHotSearch() async {
     try {
       final cookie = await _getCookie();
@@ -920,14 +965,15 @@ class MusicApiService {
   /// 播放地址 + 歌词（与原版 Go 的 GetSongUrl 一致：响应中直接返回 Lyrics）。
   /// 云端 /song/url 正常情况下会携带歌词，避免单独调 /search/lyric
   /// （该接口在部分部署下返回空）。
-  static Future<({List<String> urls, String lyrics})> getPlayUrlsWithLyrics(
+  static Future<({List<String> urls, String lyrics, String quality})>
+      getPlayUrlsWithLyrics(
     String hash, {
     String songName = '',
     String artist = '',
     String quality = '128k',
   }) async {
     if (hash.trim().isEmpty) {
-      return (urls: <String>[], lyrics: '');
+      return (urls: <String>[], lyrics: '', quality: '128k');
     }
     final normalizedQuality = _normalizeAudioQuality(quality);
     final qualityChain = normalizedQuality == 'flac'
@@ -950,15 +996,26 @@ class MusicApiService {
         final data = response.data;
         final urls = _extractPlayUrls(data);
         if (urls.isEmpty) continue;
-        // 与 Go 版一致：播放地址响应中的歌词字段（data.lyrics 或顶层 lyrics）
-        String lyrics = '';
-        final dataMap = data is Map ? data['data'] : null;
-        if (data is Map && data['lyrics'] is String) {
-          lyrics = data['lyrics'] as String;
-        } else if (dataMap is Map && dataMap['lyrics'] is String) {
-          lyrics = dataMap['lyrics'] as String;
+        // 与 Go 版一致：播放地址响应中的歌词字段。KuGouMusicApi 的
+        // /song/url 响应 data 可能是 Map（单音质）也可能是 List
+        // （多音质数组，lyrics 在每个元素里），递归查找。
+        final lyrics = _extractLyricsField(data) ?? '';
+        print('播放调试: quality=$requestedQuality 播放响应携带歌词 '
+            '${lyrics.trim().length} 字符');
+        // 从 CDN URL 识别实际音质：请求无损但无 VIP 时服务器会降级
+        // 返回 128K MP3（URL 标记 qu128），缓存必须按实际音质命名，
+        // 否则 MP3 内容会被存成 .flac 文件。
+        final requestedActualStyle = switch (requestedQuality) {
+          'flac' => 'flac',
+          '320' => '320k',
+          _ => '128k',
+        };
+        final actualQuality =
+            _detectActualQuality(urls.first) ?? requestedActualStyle;
+        if (actualQuality != requestedActualStyle) {
+          print('播放调试: 实际音质为 $actualQuality（请求 $requestedQuality 被降级）');
         }
-        return (urls: urls, lyrics: lyrics);
+        return (urls: urls, lyrics: lyrics, quality: actualQuality);
       } catch (e) {
         print('获取播放地址(含歌词)失败: hash=$hash quality=$requestedQuality error=$e');
       }
@@ -967,7 +1024,7 @@ class MusicApiService {
     // 兜底：主路径失败时，独立获取播放地址（不因歌词接口失败而阻塞播放）。
     final fallbackUrls = await getPlayUrls(hash, quality: quality);
     if (fallbackUrls.isEmpty) {
-      return (urls: <String>[], lyrics: '');
+      return (urls: <String>[], lyrics: '', quality: normalizedQuality);
     }
     // 歌词尽力而为：失败不影响播放。
     String fallbackLyrics = '';
@@ -977,7 +1034,47 @@ class MusicApiService {
     } catch (_) {
       fallbackLyrics = '';
     }
-    return (urls: fallbackUrls, lyrics: fallbackLyrics);
+    return (
+      urls: fallbackUrls,
+      lyrics: fallbackLyrics,
+      quality: _detectActualQuality(fallbackUrls.first) ?? normalizedQuality,
+    );
+  }
+
+  /// 从播放地址响应中递归提取歌词字符串。
+  /// 兼容顶层 lyrics、data.lyrics（Map）、data[i].lyrics（List）三种形态。
+  static String? _extractLyricsField(dynamic payload) {
+    if (payload is String) {
+      return payload.trim().isEmpty ? null : payload;
+    }
+    if (payload is Map) {
+      // 直接命中 lyrics 字段（可能为 krc 或 lrc 文本）。
+      final lyrics = payload['lyrics'];
+      if (lyrics is String && lyrics.trim().isNotEmpty) return lyrics;
+      if (lyrics is Map) {
+        final content = lyrics['content'];
+        if (content is String && content.trim().isNotEmpty) return content;
+      }
+      // 跳过状态字段，仅深入 data 容器，避免误读无关文本。
+      return _extractLyricsField(payload['data']);
+    }
+    if (payload is List) {
+      for (final item in payload) {
+        final found = _extractLyricsField(item);
+        if (found != null) return found;
+      }
+    }
+    return null;
+  }
+
+  /// 从 CDN URL 提取实际音质（quflac/qu320/qu128 标记或扩展名），
+  /// 返回与设置一致的命名（flac/320k/128k）；无法识别时返回 null。
+  static String? _detectActualQuality(String url) {
+    final lower = url.toLowerCase();
+    if (lower.contains('quflac') || lower.endsWith('.flac')) return 'flac';
+    if (lower.contains('qu320')) return '320k';
+    if (lower.contains('qu128')) return '128k';
+    return null;
   }
 
   static Future<String?> getPlayUrl(String hash,
@@ -986,10 +1083,36 @@ class MusicApiService {
     return urls.isEmpty ? null : urls.first;
   }
 
+  /// 持久化概念版 VIP 有效期。
+  static Future<void> _persistVipUntil(DateTime until) async {
+    _vipActiveUntil = until;
+    try {
+      final prefs = await _getPrefs();
+      await prefs.setInt(_vipUntilPrefKey, until.millisecondsSinceEpoch);
+    } catch (_) {}
+  }
+
   static Future<void> _claimYouthVipIfNeeded(String cookie) async {
     if (cookie.trim().isEmpty) return;
+    final now = DateTime.now();
+    // 有效期内（含重启后从本地恢复的记录）直接跳过，不打任何接口。
+    var activeUntil = _vipActiveUntil;
+    if (activeUntil == null) {
+      try {
+        final prefs = await _getPrefs();
+        final ms = prefs.getInt(_vipUntilPrefKey);
+        if (ms != null && ms > now.millisecondsSinceEpoch) {
+          activeUntil =
+              DateTime.fromMillisecondsSinceEpoch(ms);
+        }
+      } catch (_) {}
+    }
+    if (activeUntil != null && activeUntil.isAfter(now)) {
+      _lastVipClaim = now;
+      return;
+    }
     final lastClaim = _lastVipClaim;
-    if (lastClaim != null && DateTime.now().difference(lastClaim).inHours < 2) {
+    if (lastClaim != null && now.difference(lastClaim).inHours < 2) {
       return;
     }
     if (_vipClaimRequest != null) return _vipClaimRequest!;
@@ -999,18 +1122,100 @@ class MusicApiService {
         final conceptCookie = cookie.contains('KUGOU_API_PLATFORM')
             ? cookie
             : '$cookie;KUGOU_API_PLATFORM=lite';
-        final response =
-            await _dio.get('$baseApi/youth/day/vip', queryParameters: {
-          'cookie': conceptCookie,
-          'receive_day': _todayDate(),
-        });
-        print('概念版 VIP 领取响应: ${response.data}');
-        final data = response.data;
-        if (data is Map &&
-            (data['status'] == 1 || data['success'] == true) &&
-            (data['error_code'] == null || data['error_code'] == 0)) {
-          _lastVipClaim = DateTime.now();
+
+        // 1. 查询当前畅听 VIP 状态：/youth/day/vip 返回
+        //    data.ad_vip_end_time / server_time，有效期内存续则无需领取。
+        var hasVip = false;
+        try {
+          final query =
+              await _dio.get('$baseApi/youth/day/vip', queryParameters: {
+            'cookie': conceptCookie,
+            'receive_day': _todayDate(),
+          });
+          await _mergeDeviceCookies(query);
+          final data = query.data;
+          if (data is Map) {
+            final inner = data['data'];
+            if (inner is Map) {
+              final endTime = inner['ad_vip_end_time'];
+              final serverTime = inner['server_time'];
+              if (endTime is num && serverTime is num && endTime > serverTime) {
+                hasVip = true;
+                print('概念版 VIP 状态: 有效期内（$endTime > $serverTime），无需领取');
+                // 记录有效期（按服务器时间差换算本地时钟），
+                // 后续 2 小时冷却 + 重启后有效期内均不再请求。
+                final validMs = ((endTime - serverTime) * 1000).toInt();
+                if (validMs > 0) {
+                  unawaited(_persistVipUntil(DateTime.now()
+                      .add(Duration(milliseconds: validMs))));
+                }
+              } else {
+                print('概念版 VIP 状态: 无有效权益（ad_vip_num='
+                    '${inner['ad_vip_num']}, end_time=$endTime）');
+              }
+            }
+          }
+        } on DioException catch (e) {
+          print('查询概念版 VIP 状态失败: HTTP ${e.response?.statusCode ?? '未知'}');
         }
+
+        // 2. 无有效权益时领取：/youth/vip（KG 概念版畅听 VIP，
+        //    每次领取 3 小时，需领 8 次凑满一天；已领满/风控时接口报错即停）。
+        if (!hasVip) {
+          var claimedTimes = 0;
+          var remainHours = 0;
+          for (var i = 0; i < 8; i++) {
+            try {
+              final claim = await _dio.get('$baseApi/youth/vip',
+                  queryParameters: {'cookie': conceptCookie});
+              await _mergeDeviceCookies(claim);
+              final data = claim.data;
+              final ok = data is Map &&
+                  (data['status'] == 1 || data['success'] == true) &&
+                  (data['error_code'] == null || data['error_code'] == 0);
+              print('概念版 VIP 领取(${i + 1}/8): '
+                  '${ok ? '成功' : '停止'} ${claim.data}');
+              if (!ok) break;
+              claimedTimes++;
+              // 响应携带领取进度：remain=今天剩余可领次数，
+              // remain_vip_hour=当前 VIP 剩余小时数。
+              // remain 归零说明今天已领满，立即停止，
+              // 不再空打接口（避免触发云端风控/限流）。
+              var dayRemain = -1;
+              if (data['data'] is Map) {
+                final inner = data['data'] as Map;
+                if (inner['remain'] is num) {
+                  dayRemain = (inner['remain'] as num).toInt();
+                }
+                if (inner['remain_vip_hour'] is num) {
+                  remainHours = (inner['remain_vip_hour'] as num).toInt();
+                }
+              }
+              if (dayRemain == 0) {
+                print('概念版 VIP 今日已领满（remain=0），停止领取');
+                break;
+              }
+              // 每次领取间隔短延时，避免触发风控/限流。
+              await Future<void>.delayed(const Duration(milliseconds: 600));
+            } on DioException catch (e) {
+              print('概念版 VIP 领取异常(${i + 1}/8): '
+                  'HTTP ${e.response?.statusCode ?? '未知'}，停止领取');
+              break;
+            }
+          }
+          if (claimedTimes > 0) {
+            print('概念版 VIP 领取完成: 共 $claimedTimes 次 × 3 小时');
+          }
+          // 按最后一次响应的剩余小时数持久化有效期；
+          // 无字段时按已领次数 × 3 小时估算。
+          final validHours =
+              remainHours > 0 ? remainHours : claimedTimes * 3;
+          if (validHours > 0) {
+            unawaited(_persistVipUntil(
+                DateTime.now().add(Duration(hours: validHours))));
+          }
+        }
+        _lastVipClaim = DateTime.now();
       } on DioException catch (e) {
         print('领取概念版 VIP 失败: HTTP ${e.response?.statusCode ?? '未知'}，继续尝试播放');
       } catch (e) {
@@ -1592,53 +1797,138 @@ class MusicApiService {
 
   static Future<String> _loadRawLyrics(String hash,
       {String songName = '', String artist = ''}) async {
-    var content = '';
     final cookie = await _getCookie();
+    var content = await _fetchLyricsByHash(hash, cookie);
+    print('播放调试: 歌词兜底 hash 直查取到 ${content.length} 字符');
+    if (content.isEmpty && songName.trim().isNotEmpty) {
+      // 兜底2：按 hash 查不到歌词时，用"歌名 + 歌手"联网搜索，
+      // 取搜索结果的 hash 重新获取歌词；成功后由缓存层按原 hash 落盘。
+      content = await _loadLyricsByNameSearch(songName, artist, cookie);
+      print('播放调试: 歌词兜底歌名搜索取到 ${content.length} 字符');
+    }
+    return content;
+  }
+
+  /// 按 hash 获取歌词：/search/lyric 候选 → 官方 krcs 直搜 → /lyric 下载 → hash 直取兜底。
+  static Future<String> _fetchLyricsByHash(String hash, String cookie) async {
+    var content = '';
+    var candidates = <Map<String, dynamic>>[];
     try {
-      final search = await _dio.get('$baseApi/search/lyric', queryParameters: {
-        'hash': hash,
-        'cookie': cookie,
-        'man': 'no',
-      });
-      final candidates = search.data?['candidates'];
-      if (candidates is List && candidates.isNotEmpty) {
-        final candidate = candidates.first;
-        if (candidate is Map) {
-          final id = candidate['id']?.toString() ?? '';
-          final accessKey = candidate['accesskey']?.toString() ?? '';
-          if (id.isNotEmpty && accessKey.isNotEmpty) {
-            for (final format in const ['krc', 'lrc']) {
-              try {
-                final response = await _dio.get('$baseApi/lyric',
-                    queryParameters: {
-                      'id': id,
-                      'accesskey': accessKey,
-                      'decode': 'true',
-                      'fmt': format,
-                      'cookie': cookie,
-                    });
-                final decoded =
-                    response.data?['decodeContent']?.toString().trim() ?? '';
-                if (decoded.isNotEmpty) {
-                  content = decoded;
-                  break;
-                }
-              } catch (_) {
-                // Continue with the lower fidelity format.
-              }
-            }
-          }
-        }
+      final search = await _getWithRateLimitRetry(
+        '$baseApi/search/lyric',
+        queryParameters: {
+          'hash': hash,
+          'cookie': cookie,
+          'man': 'no',
+        },
+      );
+      final raw = search?['candidates'];
+      if (raw is List) {
+        candidates =
+            raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
       }
+      print('播放调试: /search/lyric candidates=${candidates.length}');
     } catch (e) {
-      print('云端歌词搜索失败，转入兜底: $e');
+      print('播放调试: 云端歌词搜索失败: $e');
+    }
+
+    if (candidates.isEmpty) {
+      // 部署的 /search/lyric 模块异常（返回空）时，直连酷狗官方
+      // krcs.kugou.com 按 hash 搜索歌词候选，拿 id/accesskey。
+      candidates = await _searchKrcCandidatesOfficial(hash);
+    }
+
+    if (candidates.isNotEmpty) {
+      final candidate = candidates.first;
+      final id = candidate['id']?.toString() ?? '';
+      final accessKey = candidate['accesskey']?.toString() ?? '';
+      if (id.isNotEmpty && accessKey.isNotEmpty) {
+        content = await _downloadLyricById(id, accessKey, cookie);
+      }
     }
 
     if (content.isEmpty) {
       // 兜底1：部分部署下 /search/lyric 返回空但 /lyric 支持按 hash 直取。
+      print('播放调试: /search/lyric 无候选，尝试 /lyric hash 直取');
       content = await _loadLyricsByHashDirect(hash, cookie);
     }
     return content;
+  }
+
+  /// 直连酷狗官方 krcs.kugou.com 按 hash 搜索歌词候选。
+  /// 用于部署 API 的 /search/lyric 模块异常时的替代通道。
+  static Future<List<Map<String, dynamic>>> _searchKrcCandidatesOfficial(
+      String hash) async {
+    try {
+      final response = await _dio.get(
+        'https://krcs.kugou.com/search',
+        queryParameters: {'ver': 1, 'man': 'no', 'hash': hash},
+      );
+      final data = response.data;
+      if (data is Map && data['errcode'] == 200) {
+        final raw = data['candidates'];
+        if (raw is List && raw.isNotEmpty) {
+          print('播放调试: 官方 krcs 直搜命中 ${raw.length} 个候选');
+          return raw
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
+      }
+    } catch (e) {
+      print('播放调试: 官方 krcs 直搜失败: $e');
+    }
+    return [];
+  }
+
+  /// 按歌词候选的 id/accesskey 下载歌词：优先 krc（逐字），失败降级 lrc。
+  static Future<String> _downloadLyricById(
+      String id, String accessKey, String cookie) async {
+    for (final format in const ['krc', 'lrc']) {
+      try {
+        final response = await _getWithRateLimitRetry(
+          '$baseApi/lyric',
+          queryParameters: {
+            'id': id,
+            'accesskey': accessKey,
+            'decode': 'true',
+            'fmt': format,
+            'cookie': cookie,
+          },
+        );
+        final decoded = response?['decodeContent']?.toString().trim() ?? '';
+        if (decoded.isNotEmpty) return decoded;
+      } catch (_) {
+        // Continue with the lower fidelity format.
+      }
+    }
+    return '';
+  }
+
+  /// 歌词兜底搜索：按"歌名 + 歌手"搜歌曲，用结果 hash 重取歌词（最多尝试 3 个）。
+  static Future<String> _loadLyricsByNameSearch(
+      String songName, String artist, String cookie) async {
+    try {
+      final keyword = artist.trim().isEmpty
+          ? songName.trim()
+          : '${songName.trim()} ${artist.trim()}';
+      if (keyword.isEmpty) return '';
+      final results = await searchSongs(keyword, pageSize: 10);
+      var tried = 0;
+      for (final candidate in results) {
+        if (candidate.hash.trim().isEmpty) continue;
+        if (++tried > 3) break;
+        final content = await _fetchLyricsByHash(candidate.hash, cookie);
+        if (content.isNotEmpty) {
+          print('歌词兜底命中: "$keyword" -> '
+              '${candidate.songName} - ${candidate.authorName}');
+          return content;
+        }
+      }
+    } catch (e) {
+      print('按歌名搜索歌词失败: $e');
+    }
+    return '';
   }
 
 
@@ -1647,20 +1937,47 @@ class MusicApiService {
       String hash, String cookie) async {
     for (final format in const ['krc', 'lrc']) {
       try {
-        final response = await _dio.get('$baseApi/lyric', queryParameters: {
-          'hash': hash,
-          'decode': 'true',
-          'fmt': format,
-          'cookie': cookie,
-        });
-        final content =
-            response.data?['decodeContent']?.toString().trim() ?? '';
+        final response = await _getWithRateLimitRetry(
+          '$baseApi/lyric',
+          queryParameters: {
+            'hash': hash,
+            'decode': 'true',
+            'fmt': format,
+            'cookie': cookie,
+          },
+        );
+        final content = response?['decodeContent']?.toString().trim() ?? '';
         if (content.isNotEmpty) return content;
       } catch (_) {
         // Continue with the lower fidelity format.
       }
     }
     return '';
+  }
+
+  /// 带限流退避的 GET：遇 429 时按 Retry-After 头（默认 5 秒，
+  /// 上限 30 秒）等待后重试，最多重试 2 次，其余异常原样抛出。
+  static Future<dynamic> _getWithRateLimitRetry(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+  }) async {
+    const maxRetries = 2;
+    for (var attempt = 0;; attempt++) {
+      try {
+        final response =
+            await _dio.get(path, queryParameters: queryParameters);
+        return response.data;
+      } on DioException catch (e) {
+        if (e.response?.statusCode != 429 || attempt >= maxRetries) rethrow;
+        var waitSeconds = 5;
+        final retryAfter = e.response?.headers.value('retry-after');
+        final parsed = retryAfter == null ? null : int.tryParse(retryAfter);
+        if (parsed != null && parsed > 0 && parsed <= 30) waitSeconds = parsed;
+        print('播放调试: 接口限流 429，$waitSeconds秒后重试 '
+            '${path.replaceAll('$baseApi/', '')}（第${attempt + 1}次）');
+        await Future<void>.delayed(Duration(seconds: waitSeconds));
+      }
+    }
   }
 
   static Future<String> getRawLyrics(String hash,
