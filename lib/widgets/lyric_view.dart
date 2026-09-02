@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -15,7 +15,7 @@ import '../theme/app_theme.dart';
 class LyricView extends StatefulWidget {
   const LyricView({Key? key, this.onExit}) : super(key: key);
 
-  /// 沉浸式页面退出回调（原版 Go 沉浸式播放器按 Esc 退出）。
+  /// 沉浸式页面退出回调。
   final VoidCallback? onExit;
 
   @override
@@ -49,8 +49,8 @@ class _LyricViewState extends State<LyricView>
     _scheduleControlsHide();
   }
 
-  /// 沉浸式页面键盘快捷键（对应原版 Go immersive-player.js：
-  /// Esc 退出、Space 播放/暂停、←/→ 上一首/下一首、↑/↓ 音量加减）。
+  /// 沉浸式页面键盘快捷键
+  /// （Esc 退出、Space 播放/暂停、←/→ 上一首/下一首、↑/↓ 音量加减）。
   void _handleKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) return;
     final player = context.read<AudioPlayerManager>();

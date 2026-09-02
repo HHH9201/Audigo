@@ -327,7 +327,7 @@ class _MainScaffoldState extends State<MainScaffold> {
       backgroundColor: AppTheme.bgWarm,
       body: Column(
         children: [
-          // 1. 顶部自定义标题栏 (完全等比复刻原版)
+          // 1. 顶部自定义标题栏
           _buildCustomTitleBar(context),
 
           // 2. 中间主体 (左侧导航栏 + 主内容区 + 可选右侧栏)
@@ -358,7 +358,7 @@ class _MainScaffoldState extends State<MainScaffold> {
             ),
           ),
 
-          // 3. 底部固定播放栏 (完全等比复刻原版 80px 高度)
+          // 3. 底部固定播放栏 (80px 高度)
           BottomPlayerBar(
             onTogglePlaylist: () {
               setState(() {

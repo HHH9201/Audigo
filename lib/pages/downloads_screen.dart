@@ -69,7 +69,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     if (mounted) await context.read<AudioPlayerManager>().playSong(song);
   }
 
-  /// 打开下载文件所在的文件夹（对应原版 Go 的 DownloadService.OpenFileFolder）。
+  /// 打开下载文件所在的文件夹。
   Future<void> _openFolder(Map<String, dynamic> item) async {
     final path = item['file_path']?.toString() ?? '';
     if (path.isEmpty || !await File(path).exists()) {

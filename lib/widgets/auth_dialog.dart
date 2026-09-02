@@ -58,7 +58,7 @@ class _AuthDialogState extends State<AuthDialog> {
     super.dispose();
   }
 
-  // 登录方式文本（对应 Go 版 saveLoginMethodToFile / readLoginMethodFromFile）
+  // 登录方式文本
   String _loginMethodText() {
     var method = 'unknown';
     final cached = _prefsCache;
@@ -154,8 +154,7 @@ class _AuthDialogState extends State<AuthDialog> {
     setState(() => _isSubmitting = false);
 
     if (res['success'] == true) {
-      // 与原版 Go 版 loginSuccess 一致：直接使用登录响应的用户信息更新界面，
-      // 不依赖 getUserDetail 二次校验。
+      // 直接使用登录响应的用户信息更新界面，不依赖 getUserDetail 二次校验。
       final data = res['data'];
       final userData = data is Map
           ? Map<String, dynamic>.from(data)
@@ -246,8 +245,8 @@ class _AuthDialogState extends State<AuthDialog> {
           _qrLog('UI 确认扫码成功，停止轮询并切换到用户信息');
           timer.cancel();
           _qrPollingTimer = null;
-          // 与原版 Go 版 loginSuccess 一致：直接使用扫码响应中的
-          // nickname/pic/userid 更新界面，不依赖 getUserDetail 二次校验。
+          // 直接使用扫码响应中的 nickname/pic/userid 更新界面，
+          // 不依赖 getUserDetail 二次校验。
           final userData = Map<String, dynamic>.from(data as Map);
           setState(() {
             _isLoggedIn = true;
@@ -347,7 +346,7 @@ class _AuthDialogState extends State<AuthDialog> {
         (_userData?['vip_type'] ?? 0) > 0 || (_vipData?['is_vip'] ?? 0) == 1;
     final vipEndTime = _vipData?['vip_end_time'] ?? '-';
     final vipType = _vipData?['product_type'] ?? '-';
-    // 登录时间（秒时间戳），对应 Go 版 userInfo.userData.login_time
+    // 登录时间（秒时间戳）
     final loginTimeRaw = _userData?['login_time'];
     final loginTime = loginTimeRaw is num && loginTimeRaw > 0
         ? DateTime.fromMillisecondsSinceEpoch(loginTimeRaw.toInt() * 1000)
@@ -358,7 +357,7 @@ class _AuthDialogState extends State<AuthDialog> {
             '${loginTime.day.toString().padLeft(2, '0')} '
             '${loginTime.hour.toString().padLeft(2, '0')}:'
             '${loginTime.minute.toString().padLeft(2, '0')}';
-    // 登录方式（对应 Go 版 saveLoginMethodToFile / readLoginMethodFromFile）
+    // 登录方式
     final loginMethod = _loginMethodText();
 
     return Column(
@@ -473,7 +472,7 @@ class _AuthDialogState extends State<AuthDialog> {
         const Divider(height: 1),
         const SizedBox(height: 16),
 
-        // 用户详细列表项（与原版 Go 用户信息弹窗一致）
+        // 用户详细信息列表项
         _detailRow("用户 ID", "$userid"),
         _detailRow("登录方式", loginMethod),
         _detailRow("登录时间", loginTimeText),

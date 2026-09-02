@@ -41,3 +41,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 本机运行产生的文件
+.window_pos.txt
+.task/

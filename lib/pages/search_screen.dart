@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:open_file/open_file.dart';
 import 'package:provider/provider.dart';
 
 import '../models/song.dart';
@@ -245,6 +246,29 @@ class _SearchScreenState extends State<SearchScreen>
       path == null ? '下载失败或已取消' : '已下载到 $path',
       isError: path == null,
     );
+  }
+
+  Future<void> _playMv(Map<String, dynamic> item) async {
+    final mvHash = item['id']?.toString() ?? '';
+    final title = item['title']?.toString() ?? 'MV';
+    if (mvHash.isEmpty) {
+      AppToast.show(context, 'MV 信息不完整，无法播放', isError: true);
+      return;
+    }
+    AppToast.show(context, '正在获取 MV: $title');
+    final url = await MusicApiService.getMvUrl(mvHash);
+    if (!mounted) return;
+    if (url == null) {
+      AppToast.show(context, 'MV 暂无可用播放源（可能需要 VIP 或版权受限）',
+          isError: true);
+      return;
+    }
+    // 打开系统默认播放器播流（应用内 libmpv 仅音频模式挂载，无视频管线）。
+    final result = await OpenFile.open(url);
+    if (!mounted) return;
+    if (result.type != ResultType.done) {
+      AppToast.show(context, '无法打开 MV: ${result.message}', isError: true);
+    }
   }
 
   @override
@@ -691,6 +715,12 @@ class _SearchScreenState extends State<SearchScreen>
           type: 'artist',
         ),
       );
+      return;
+    }
+    // MV：取直链后调系统默认播放器播放（应用内无视频渲染管线，
+    // libmpv 只以音频模式挂载；系统播放器可播流式 mp4）。
+    if (index == 4) {
+      _playMv(item);
       return;
     }
     if (index != 2 && index != 3) return;

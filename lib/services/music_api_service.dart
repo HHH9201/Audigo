@@ -45,19 +45,16 @@ class LyricsContent {
 }
 
 class MusicApiService {
-  // 主接口与多备用镜像节点列表（第一个为主接口，与原版 Go config.go 一致）
-  static const List<String> apiMirrors = [
-    "https://localhost:40000",
-  ];
-  // 可通过 --dart-define=AUDIGO_API=http://localhost:40000 指向本地 KuGouMusicApi 调试
+  // 后端 API 地址（KuGouMusicApi 部署地址，部署方式见 README）
+  // 可通过 --dart-define=AUDIGO_API=http://localhost:40000 指向自建/本地 KuGouMusicApi
   static String baseApi = const String.fromEnvironment(
     'AUDIGO_API',
-    defaultValue: 'https://localhost:40000',
+    defaultValue: 'http://localhost:40000',
   );
 
-  // 云网关鉴权 token（与原版 Go config.go 的 apiToken 一致）
-  static const String apiToken =
-      "768b27f839b768c39fa3c23b9f6c5a8c620763bb322968a589ced243f7e1803b";
+  // 云网关鉴权 token（可选：后端启用了 token 校验时需提供，
+  // 通过 --dart-define=AUDIGO_API_TOKEN=your_token 注入，留空则不附加鉴权头）
+  static const String apiToken = String.fromEnvironment('AUDIGO_API_TOKEN');
 
   static final Dio _dio = _createDio();
   static DateTime? _lastVipClaim;
@@ -74,9 +71,8 @@ class MusicApiService {
     return _prefsFuture ??= SharedPreferences.getInstance();
   }
 
-  /// 是否为发往云网关（baseApi）的请求。
-  static bool _isGatewayRequest(String url) =>
-      url.startsWith(apiMirrors.first);
+  /// 是否为发往后端（baseApi）的请求。
+  static bool _isGatewayRequest(String url) => url.startsWith(baseApi);
 
   static bool _isRetryableNetworkError(DioException error) {
     if (error.response?.statusCode case final status? when status >= 500) {
@@ -119,8 +115,9 @@ class MusicApiService {
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
-          // 发往云网关的请求自动附加鉴权头（与原版 Go roundTripFunc 一致）
-          if (_isGatewayRequest(options.uri.toString())) {
+          // 发往后端的请求自动附加鉴权头（若配置了 token）
+          if (_isGatewayRequest(options.uri.toString()) &&
+              apiToken.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $apiToken';
           }
           handler.next(options);
@@ -279,31 +276,7 @@ class MusicApiService {
   }
 
   // 获取本地保存的 Cookie（用户 + 设备参数合并后的完整 cookie）
-  static Future<String> _getCookie() async {
-    final cookie = await _buildFullCookie();
-    if (cookie.isNotEmpty) return cookie;
-
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      final home =
-          Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
-      if (home != null && home.isNotEmpty) {
-        final separator = Platform.pathSeparator;
-        final file = File(
-          '$home${separator}.config${separator}gomusic${separator}cookies.txt',
-        );
-        if (await file.exists()) {
-          final legacy = (await file.readAsString()).trim();
-          if (legacy.isNotEmpty) {
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setString('user_cookie', legacy);
-            return _buildFullCookie();
-          }
-        }
-      }
-    }
-
-    return '';
-  }
+  static Future<String> _getCookie() => _buildFullCookie();
 
   /// 从响应头 Set-Cookie 中提取设备参数并保存到独立的 device_* 字段。
   /// 服务端会下发 KUGOU_API_MID/dfid 等由酷狗签发的值；GUID/DEV/MAC/WEBGL
@@ -396,8 +369,7 @@ class MusicApiService {
   }
 
   // 2. 获取私人 FM (支持模式 normal/small/peak 与 AI pool)
-  // 对应原版 Go 的 GetPersonalFM / GetPersonalFMSimple / GetPersonalFMWithParams
-  // / GetPersonalFMAdvanced（isOverplay/remainSongCnt/playTime 高级参数）。
+  // 高级参数：isOverplay/remainSongCnt/playTime。
   static Future<List<Song>> getPersonalFM({
     String mode = 'normal',
     int songPoolId = 0,
@@ -523,7 +495,7 @@ class MusicApiService {
 
   static Future<SearchPage<Song>> searchSongPage(String keyword,
       {int page = 1, int pageSize = 30}) async {
-    // 主路径：/search?type=song（酷狗 v1，Go 版验证可用的路径，解析 data.lists 的大写字段）
+    // 主路径：/search?type=song（酷狗 v1，解析 data.lists 的大写字段）
     final songResult =
         await _searchSongsByTypeSong(keyword, page: page, pageSize: pageSize);
     if (songResult.items.isNotEmpty) return songResult;
@@ -851,8 +823,7 @@ class MusicApiService {
     ];
   }
 
-  /// 获取新碟上架并按分类（chn 华语/eur 欧美/jpn 日韩/kor 韩国）返回，
-  /// 对应原版 Go 的 [DiscoverService.GetNewAlbumsByCategory]。
+  /// 获取新碟上架并按分类（chn 华语/eur 欧美/jpn 日韩/kor 韩国）返回。
   static Future<Map<String, List<Map<String, dynamic>>>> getNewAlbumsByCategory() async {
     try {
       final cookie = await _getCookie();
@@ -913,7 +884,7 @@ class MusicApiService {
     final urls = await _requestPlayUrls(hash, qualityChain, cookie);
     if (urls.isNotEmpty) return urls;
 
-    // 版权受限或 Hash 失效时，按 Go 版逻辑寻找同名可播放资源。
+    // 版权受限或 Hash 失效时，寻找同名可播放资源。
     if (songName.trim().isNotEmpty) {
       final candidates = await searchSongs(songName, pageSize: 10);
       for (final candidate in candidates) {
@@ -962,7 +933,7 @@ class MusicApiService {
     return [];
   }
 
-  /// 播放地址 + 歌词（与原版 Go 的 GetSongUrl 一致：响应中直接返回 Lyrics）。
+  /// 播放地址 + 歌词（响应中直接返回 Lyrics）。
   /// 云端 /song/url 正常情况下会携带歌词，避免单独调 /search/lyric
   /// （该接口在部分部署下返回空）。
   static Future<({List<String> urls, String lyrics, String quality})>
@@ -996,7 +967,7 @@ class MusicApiService {
         final data = response.data;
         final urls = _extractPlayUrls(data);
         if (urls.isEmpty) continue;
-        // 与 Go 版一致：播放地址响应中的歌词字段。KuGouMusicApi 的
+        // 播放地址响应中的歌词字段。KuGouMusicApi 的
         // /song/url 响应 data 可能是 Map（单音质）也可能是 List
         // （多音质数组，lyrics 在每个元素里），递归查找。
         final lyrics = _extractLyricsField(data) ?? '';
@@ -1400,8 +1371,7 @@ class MusicApiService {
     }
   }
 
-  /// 为 AI 推荐获取我喜欢的歌曲（更大的 pagesize），
-  /// 对应原版 Go 的 [FavoritesService.GetFavoriteSongsForAI]。
+  /// 为 AI 推荐获取我喜欢的歌曲（更大的 pagesize）。
   static Future<List<Song>> getFavoriteSongsForAI(
     String globalCollectionId,
   ) async {
@@ -1646,7 +1616,7 @@ class MusicApiService {
       }
     }
     final documents = await getApplicationDocumentsDirectory();
-    // 优先使用设置中保存的自定义下载路径（对应原版 Go 的 downloadPath 设置）。
+    // 优先使用设置中保存的自定义下载路径。
     var directory = prefs.getString('download_path')?.trim();
     if (directory == null || directory.isEmpty) {
       directory = await FilePicker.platform.getDirectoryPath(

@@ -1,4 +1,4 @@
-﻿import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,7 +8,7 @@ import '../services/music_api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_toast.dart';
 
-/// “我喜欢的”页面 —— 与原版 Go 版布局一致：
+/// “我喜欢的”页面：
 /// 大封面 + 类型徽章 + 歌单标题 + 创建者 + 歌曲数 + 简介 + 操作按钮，
 /// 下方为表格型歌曲列表（# / 标题 / 专辑 / 时长 / 操作）。
 class FavoritesScreen extends StatefulWidget {
@@ -23,7 +23,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   bool _isLoading = true;
   bool _isRefreshing = false;
 
-  // 歌单头部信息（与原版一致：封面 / 简介 / 创建者 / 歌曲数）
+  // 歌单头部信息（封面 / 简介 / 创建者 / 歌曲数）
   String _coverUrl = '';
   String _intro = '';
   String _creator = '';
@@ -45,7 +45,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       _isRefreshing = true;
     });
 
-    // 1. 读取“我喜欢的”歌单头部信息（listid=2），与原版 GetPlaylistDetail 对应
+    // 1. 读取“我喜欢的”歌单头部信息（listid=2）
     try {
       final playlists = await MusicApiService.getUserPlaylists();
       final favorite = playlists.where((p) => p.listId == 2).firstOrNull;
@@ -324,7 +324,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // 歌曲列表表头（与原版 songs-list-header 一致）
+                  // 歌曲列表表头
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

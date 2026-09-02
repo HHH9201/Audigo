@@ -814,8 +814,7 @@ class AudioPlayerManager extends ChangeNotifier {
       }
     }
 
-    // 1. 获取在线音频地址 + 歌词（与原版 Go 的 GetSongUrl 一致：
-    //    响应中直接携带歌词，避免单独调用 /search/lyric）。
+    // 1. 获取在线音频地址 + 歌词（响应中直接携带歌词，避免单独调用 /search/lyric）。
     final quality = await _effectiveStreamingQuality();
     print('播放调试: 开始在线播放 ${song.songName} quality=$quality');
     final playResult = await MusicApiService.getPlayUrlsWithLyrics(
@@ -852,7 +851,7 @@ class AudioPlayerManager extends ChangeNotifier {
       unawaited(_fetchLyricsWithRetry(song, requestId));
     }
 
-    // 3. 与 Go 原版一致：优先同步缓存整首歌曲，再播放本地文件。
+    // 3. 优先同步缓存整首歌曲，再播放本地文件。
     //    开启开关可在设置关闭整首缓存而直接流式播放。
     //    在线接口拿不到 URL（上游故障/无 VIP）时，从云盘兜底取音频。
     File? audioFile;

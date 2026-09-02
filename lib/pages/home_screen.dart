@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/music_api_service.dart';
@@ -222,7 +222,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 私人 FM 卡片 (1:1 原版)
+  // 私人 FM 卡片
   Widget _buildFmSection(BuildContext context) {
     final player = context.read<AudioPlayerManager>();
     final currentFm = _fmList.isNotEmpty && _fmIndex < _fmList.length
@@ -446,7 +446,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // AI 推荐卡片 (1:1 原版)
+  // AI 推荐卡片
   Widget _buildAiSection(BuildContext context) {
     final player = context.read<AudioPlayerManager>();
     final currentAi = _aiList.isNotEmpty && _aiIndex < _aiList.length

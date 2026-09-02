@@ -7,10 +7,9 @@ import 'audio_player_manager.dart';
 
 /// 桌面端媒体键与全局快捷键管理器。
 ///
-/// 对应原版 Go 版本 `mediakeyservice.go` + `frontend/systray-controller.js` 的
-/// 前端键盘监听部分：支持 Space 播放/暂停、F7/F8/F9 上一首/播放暂停/下一首、
-/// Ctrl+←/→ 上一首/下一首、Ctrl+↑/↓ 音量加减（与原版 GetMediaKeyStatus 列出的
-/// 快捷键一致）。Linux 上系统级媒体键由 [MprisService]（D-Bus）负责，本管理器
+/// 支持 Space 播放/暂停、F7/F8/F9 上一首/播放暂停/下一首、
+/// Ctrl+←/→ 上一首/下一首、Ctrl+↑/↓ 音量加减。
+/// Linux 上系统级媒体键由 [MprisService]（D-Bus）负责，本管理器
 /// 作为全局快捷键补充。
 class DesktopMediaKeyManager {
   DesktopMediaKeyManager._();
@@ -40,7 +39,7 @@ class DesktopMediaKeyManager {
       (_) => player.playNext(),
     );
 
-    // 通用功能键（与原版 Go 前端一致）
+    // 通用功能键
     await _register(
       HotKey(key: LogicalKeyboardKey.f8),
       (_) => player.togglePlay(),
